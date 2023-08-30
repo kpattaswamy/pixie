@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include "src/common/base/base.h"
-#include "src/stirling/source_connectors/socket_tracer/protocols/common/interface.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/types.h"
 #include "src/stirling/utils/binary_decoder.h"
 
@@ -28,17 +26,8 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
-ParseState ParseFullFrame(BinaryDecoder* decoder, Frame* frame);
-
+ParseState ProcessPayload(BinaryDecoder* decoder, Frame* frame);
 }  // namespace mongodb
-
-template <>
-ParseState ParseFrame(message_type_t type, std::string_view* buf, mongodb::Frame* frame, NoState*);
-
-template <>
-size_t FindFrameBoundary<mongodb::Frame>(message_type_t type, std::string_view buf,
-                                         size_t start_pos, NoState*);
-
 }  // namespace protocols
 }  // namespace stirling
 }  // namespace px

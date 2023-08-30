@@ -30,11 +30,11 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
-enum class Type : uint16_t {
+enum class Type : int32_t {
   kOPMsg = 2013,
   kOPReply = 1,
   kOPUpdate = 2001,
-  kOPInsert = 2002, 
+  kOPInsert = 2002,
   kReserved = 2003,
   kOPQuery = 2004,
   kOPGetMore = 2005,
@@ -48,24 +48,30 @@ const uint8_t kHeaderLength = 16;
 
 struct Section {
   uint8_t kind = 0;
-  uint32_t length = 0;
+  int32_t length = 0;
   std::string_view body;
 };
 
+// MongoDB's Wire Protocol documentation can be found here:
+// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#std-label-wire-msg-sections
+
 // The header frame for MongoDB is:
-// 0          4          8          12         16                  
+// 0          4          8          12         16
 // +----------+----------+----------+----------+    +----------------+
 // |  length  |requestID |responseTo|  opCode  |    |    payload     |
 // +----------+----------+----------+----------+    +----------------+
-//     long       long       long       long           length - 16       
+//     long       long       long       long           length - 16
 
 struct Frame : public FrameBase {
-  // Length of the mongodb header and the application protocol data excluding
-  // the 4 byte messageLength field.
+  // Message Header Fields
+  // Length of the mongodb header and the application protocol data.
   uint32_t length = 0;
-  uint32_t request_id = 0;
-  uint32_t response_to = 0;
-  uint32_t op_code = 0;
+  int32_t request_id = 0;
+  int32_t response_to = 0;
+  int32_t op_code = 0;
+
+  // OP_MSG Fields
+  // Bits 0-15 are required and bits 16-31 are optional.
   uint32_t flag_bits = 0;
   bool checksum_present = false;
   bool more_to_come = false;
@@ -73,11 +79,20 @@ struct Frame : public FrameBase {
   std::vector<Section> sections;
   uint32_t checksum = 0;
 
+  // OP_COMPRESSED Fields
+  int32_t original_opcode = 0;
+  // Length of the uncompressed message, excluding the message header.
+  int32_t uncompressed_size = 0;
+  uint8_t compressor_id = 0;
+  std::string_view compressed_message;
+
+  bool consumed = false;
   size_t ByteSize() const override { return sizeof(Frame); }
 
   std::string ToString() const override {
-    return absl::Substitute("MongoDB message [length=$0 requestID=$1 responseTo=$2 opCode=$3 flagBits=$4 checksum=$5]", length,
-                            request_id, response_to, op_code, flag_bits, checksum);
+    return absl::Substitute(
+        "MongoDB message [length=$0 requestID=$1 responseTo=$2 opCode=$3 flagBits=$4 checksum=$5]",
+        length, request_id, response_to, op_code, flag_bits, checksum);
   }
 };
 
