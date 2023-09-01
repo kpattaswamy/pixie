@@ -160,7 +160,7 @@ REPOSITORY_LOCATIONS = dict(
     com_github_mongodb_mongo_c_driver = dict(
         sha256 = "fdb9de045efabedf67b0ac8d7e77006705b22d954579567af75d440fd0a2c5e1",
         strip_prefix = "mongo-c-driver-1.24.0",
-        urls = ["https://github.com/mongodb/mongo-c-driver/archive/refs/tags/1.24.0.tar.gz"]
+        urls = ["https://github.com/mongodb/mongo-c-driver/archive/refs/tags/1.24.0.tar.gz"],
     ),
     com_github_nats_io_natsc = dict(
         sha256 = "16e700d912034faefb235a955bd920cfe4d449a260d0371b9694d722eb617ae1",

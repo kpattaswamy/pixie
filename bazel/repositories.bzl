@@ -169,7 +169,6 @@ def _cc_deps():
     _bazel_repo("com_github_libbpf_libbpf", build_file = "//bazel/external:libbpf.BUILD")
     _bazel_repo("com_github_mongodb_mongo_c_driver", build_file = "//bazel/external:mongo_c_driver.BUILD")
 
-
     # Uncomment these to develop bcc and/or bpftrace locally. Should also comment out the corresponding _bazel_repo lines.
     # _local_repo("com_github_iovisor_bcc", build_file = "//bazel/external/local_dev:bcc.BUILD")
     # _local_repo("com_github_iovisor_bpftrace", build_file = "//bazel/external/local_dev:bpftrace.BUILD")

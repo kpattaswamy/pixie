@@ -19,6 +19,7 @@ load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 licenses(["notice"])
 
 exports_files(["LICENSE"])
+
 filegroup(
     name = "all",
     srcs = glob(["**"]),
@@ -26,18 +27,18 @@ filegroup(
 
 cmake(
     name = "mongo_c_driver",
-    cache_entries = {
-        "BUILD_VERSION": "1.24.0",
-    },
-    out_static_libs = [
-        "libbson-static-1.0.a"
-    ],
     build_args = [
         "--",  # <- Pass remaining options to the native tool.
         "-j`nproc`",
         "-l`nproc`",
     ],
+    cache_entries = {
+        "BUILD_VERSION": "1.24.0",
+    },
     lib_source = ":all",
+    out_static_libs = [
+        "libbson-static-1.0.a",
+    ],
     visibility = ["//visibility:public"],
     working_directory = "",
 )
