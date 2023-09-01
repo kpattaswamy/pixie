@@ -29,10 +29,6 @@ cmake(
     cache_entries = {
         "BUILD_VERSION": "1.24.0",
     },
-    includes = [
-        "src/libbson/src/bson",
-    ],
-    #out_include_dir = "src/libbson/src",
     out_static_libs = [
         "libbson-static-1.0.a"
     ],

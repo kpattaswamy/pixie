@@ -49,7 +49,7 @@ const uint8_t kHeaderLength = 16;
 struct Section {
   uint8_t kind = 0;
   int32_t length = 0;
-  std::string_view body;
+  std::string body;
 };
 
 // MongoDB's Wire Protocol documentation can be found here:

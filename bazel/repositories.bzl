@@ -167,7 +167,6 @@ def _cc_deps():
     _bazel_repo("com_github_opentelemetry_proto", build_file = "//bazel/external:opentelemetry.BUILD")
     _bazel_repo("com_github_uriparser_uriparser", build_file = "//bazel/external:uriparser.BUILD")
     _bazel_repo("com_github_libbpf_libbpf", build_file = "//bazel/external:libbpf.BUILD")
-    #_bazel_repo("com_github_mongodb_mongo_cxx_driver", build_file = "//bazel/external:mongo_cxx_driver.BUILD")
     _bazel_repo("com_github_mongodb_mongo_c_driver", build_file = "//bazel/external:mongo_c_driver.BUILD")
 
 

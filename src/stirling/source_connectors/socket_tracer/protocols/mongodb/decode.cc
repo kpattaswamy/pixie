@@ -18,12 +18,12 @@
 
 #include <string>
 
-//#include <bsoncxx/builder/stream/document.hpp>
-#include <bson.h>
+#include <libbson-1.0/bson.h>
 
 #include "src/common/base/base.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/decode.h"
 #include "src/stirling/utils/binary_decoder.h"
+#include "src/common/base/utils.h"
 
 namespace px {
 namespace stirling {
@@ -45,8 +45,6 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       return ParseState::kInvalid;
     }
   }
-  // TODO (kpattaswamy): If moreToCome is set, preserve the data that will be 
-  // parsed from this frame and link it with the upcoming frames.
 
   frame->flag_bits = flag_bits;
 
@@ -60,27 +58,23 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
   while(decoder->BufSize() > checksum_bytes) {
     mongodb::Section section;
     PX_ASSIGN_OR(section.kind, decoder->ExtractIntFromLEndianBytes<uint8_t>(), return ParseState::kInvalid);
-    PX_ASSIGN_OR(section.length, decoder->ExtractIntFromLEndianBytes<int32_t>(), return ParseState::kInvalid);
-    uint32_t body_length = section.length - 4; 
-    PX_ASSIGN_OR(section.body, decoder->ExtractString(body_length), return ParseState::kInvalid);
-    frame->sections.push_back(section);
+    int32_t section_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
+    section.length = section_length;
+    PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(section.length), return ParseState::kInvalid);
 
-    /* Following code will perform bson parsing for testing purposes*/
-    bson_t *b;
+    bson_t *b = bson_new_from_data(section_body.data(), section.length);
+    char *json;
 
-    b = bson_new_from_data (section.body, body_length);
-    if (!b) {
-      fprintf (stderr, "The specified length embedded in <my_data> did not match "
-                        "<my_data_len>\n");
-      return;
+    if (b != nullptr) {
+      json = bson_as_canonical_extended_json(b, NULL);
+      if (json != nullptr) {
+          section.body = json;
+          bson_free(json);
+      }
+      bson_destroy(b);
     }
-
-    bson_destroy (b);
-
-    // bsoncxx::document::view view = section.body; 
-    // std::string json_str = bsoncxx::to_json(view);
-    // LOG(INFO) << absl::Substitute("json string rep of bson: $0", json_str);
-
+    LOG(INFO) << absl::Substitute("$0", section.body);
+    frame->sections.push_back(section);
   }
 
   // Get the checksum data, if necessary.
