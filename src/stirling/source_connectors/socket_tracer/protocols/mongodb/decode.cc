@@ -35,6 +35,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
                return ParseState::kInvalid);
 
   // Find relavent flag bit information and ensure remaining bits are not set.
+  // Bits 0-15 are required and bits 16-31 are optional.
   for (int i = 0; i < 17; i++) {
     if (i == 0 && (flag_bits >> i) & 1) {
       frame->checksum_present = true;
@@ -47,36 +48,63 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
     }
   }
 
-  frame->flag_bits = flag_bits;
-
   // Determine the number of checksum bytes in the buffer.
-  uint8_t checksum_bytes = 0;
-  if (frame->checksum_present) {
-    checksum_bytes = 4;
-  }
+  uint8_t checksum_bytes = (frame->checksum_present) ? 4 : 0;
 
   // Get the section(s) data from the buffer.
   while (decoder->BufSize() > checksum_bytes) {
     mongodb::Section section;
     PX_ASSIGN_OR(section.kind, decoder->ExtractIntFromLEndianBytes<uint8_t>(),
                  return ParseState::kInvalid);
-    int32_t section_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
-    section.length = section_length;
-    PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(section.length),
-                 return ParseState::kInvalid);
+    // Length of the section still remaining in the buffer.
+    int32_t remaining_section_length = 0;
 
-    bson_t* b = bson_new_from_data(section_body.data(), section.length);
-    char* json;
-
-    if (b != nullptr) {
-      json = bson_as_canonical_extended_json(b, NULL);
-      if (json != nullptr) {
-        section.body = json;
-        bson_free(json);
+    if (section.kind == 0) {
+      section.length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
+      if (section.length <= 0) {
+        return ParseState::kInvalid;
       }
-      bson_destroy(b);
+      remaining_section_length = section.length;
+
+    } else if (section.kind == 1) {
+      PX_ASSIGN_OR(section.length, decoder->ExtractIntFromLEndianBytes<uint32_t>(),
+                   return ParseState::kInvalid);
+      if (section.length <= 0) {
+        return ParseState::kInvalid;
+      }
+
+      // Get the sequence ID (command argument).
+      PX_ASSIGN_OR(std::string_view seq_id, decoder->ExtractStringUntil('\0'),
+                   return ParseState::kInvalid);
+
+      // Make sure the sequence ID is a valid OP_MSG command argument.
+      if (seq_id != "documents" && seq_id != "updates" && seq_id != "deletes") {
+        return ParseState::kInvalid;
+      }
+
+      remaining_section_length = section.length - kSectionLengthSize - seq_id.length() - 1;
     }
-    LOG(INFO) << absl::Substitute("$0", section.body);
+
+    // Extract the document(s) from the section and convert it from type BSON to JSON string.
+    while (decoder->BufSize() > decoder->BufSize() - remaining_section_length) {
+      auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
+      PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(document_length),
+                   return ParseState::kInvalid);
+      bson_t* bson_doc = bson_new_from_data(section_body.data(), document_length);
+      if (bson_doc == NULL) {
+        return ParseState::kInvalid;
+      }
+      char* json = bson_as_canonical_extended_json(bson_doc, NULL);
+      if (json == NULL) {
+        return ParseState::kInvalid;
+      }
+      section.documents.push_back(json);
+
+      bson_free(json);
+      bson_destroy(bson_doc);
+    }
+
+    LOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 
@@ -107,13 +135,12 @@ ParseState ProcessOpCompressed(BinaryDecoder* decoder, Frame* frame) {
   PX_ASSIGN_OR(frame->compressed_message, decoder->ExtractString(message_length),
                return ParseState::kInvalid);
 
-  // TODO(kpattaswamy): Add support to decompress the compressed message.
-  return ParseState::kSuccess;
+  // TODO(kpattaswamy): Add support to decompress the message.
+  return ParseState::kIgnored;
 }
 
 ParseState ProcessPayload(BinaryDecoder* decoder, Frame* frame) {
   Type frame_type = static_cast<Type>(frame->op_code);
-
   switch (frame_type) {
     case Type::kOPMsg:
       return ProcessOpMsg(decoder, frame);

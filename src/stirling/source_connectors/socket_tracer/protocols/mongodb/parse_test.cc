@@ -279,7 +279,7 @@ TEST_F(MongoDBParserTest, ParseFrameValidMongoDBResponse) {
   auto frame_view = CreateStringView<char>(CharArrayStringView<uint8_t>(mongoDBValidResponse));
 
   mongodb::Frame frame;
-  ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
+  ParseState state = ParseFrame(message_type_t::kResponse, &frame_view, &frame);
 
   ASSERT_EQ(frame.length, 45);
   ASSERT_EQ(frame.request_id, 917);

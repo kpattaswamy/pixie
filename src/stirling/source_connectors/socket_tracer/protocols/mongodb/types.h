@@ -43,24 +43,53 @@ enum class Type : int32_t {
   kOPCompressed = 2012,
 };
 
-const uint8_t kMessageLengthSize = 4;
 const uint8_t kHeaderLength = 16;
+const uint8_t kMessageLengthSize = 4;
+const uint8_t kSectionLengthSize = 4;
 
 struct Section {
   uint8_t kind = 0;
   int32_t length = 0;
-  std::string body;
+  std::vector<std::string> documents;
 };
 
-// MongoDB's Wire Protocol documentation can be found here:
-// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#std-label-wire-msg-sections
-
-// The header frame for MongoDB is:
-// 0          4          8          12         16
-// +----------+----------+----------+----------+    +----------------+
-// |  length  |requestID |responseTo|  opCode  |    |    payload     |
-// +----------+----------+----------+----------+    +----------------+
-//     long       long       long       long           length - 16
+/**
+ * MongoDB's Wire Protocol documentation can be found here:
+ * https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#std-label-wire-msg-sections
+ *
+ * The header for a standard message looks like:
+ * -----------------------------------------------------------------------
+ * |  int32 length  | int32 requestID | int32 responseTo|  int32 opCode  |
+ * -----------------------------------------------------------------------
+ *
+ * Documentation regarding OP_MSG frames can be found here:
+ * https://github.com/mongodb/specifications/blob/master/source/message/OP_MSG.rst#sections
+ *
+ * A frame of type OP_MSG looks like:
+ * -----------------------------------------------------------------------
+ * |  int32 length  | int32 requestID | int32 responseTo|  int32 opCode  |
+ * -----------------------------------------------------------------------
+ * | uint32 flagBits|  Sections[] sections  |  optional uint32 checksum  |
+ * -----------------------------------------------------------------------
+ *
+ * There must be only one payload section of kind 0 and any number of payload sections of kind 1.
+ *
+ * A payload section of kind 0 looks like:
+ * -----------------------------------------------------------------------
+ * |  uint8 kind | int32 document payload length |        document       |
+ * -----------------------------------------------------------------------
+ *
+ * A payload section of kind 1 looks like:
+ * -----------------------------------------------------------------------
+ * |  uint8 kind  |               int32 section length                   |
+ * -----------------------------------------------------------------------
+ * |       identifier (command argument that ends with \x00)             |
+ * -----------------------------------------------------------------------
+ * | int32 document payload length |              document               |
+ * -----------------------------------------------------------------------
+ *
+ * There can be 0 or more documents in a section of kind 1 without a separator between them.
+ */
 
 struct Frame : public FrameBase {
   // Message Header Fields
@@ -71,8 +100,7 @@ struct Frame : public FrameBase {
   int32_t op_code = 0;
 
   // OP_MSG Fields
-  // Bits 0-15 are required and bits 16-31 are optional.
-  uint32_t flag_bits = 0;
+  // Relavent flag bits
   bool checksum_present = false;
   bool more_to_come = false;
   bool exhaust_allowed = false;
@@ -91,8 +119,8 @@ struct Frame : public FrameBase {
 
   std::string ToString() const override {
     return absl::Substitute(
-        "MongoDB message [length=$0 requestID=$1 responseTo=$2 opCode=$3 flagBits=$4 checksum=$5]",
-        length, request_id, response_to, op_code, flag_bits, checksum);
+        "MongoDB message [length=$0 requestID=$1 responseTo=$2 opCode=$3 checksum=$4]", length,
+        request_id, response_to, op_code, checksum);
   }
 };
 
