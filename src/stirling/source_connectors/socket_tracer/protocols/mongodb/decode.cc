@@ -18,6 +18,7 @@
 
 #include <libbson-1.0/bson.h>
 
+#include <rapidjson/document.h>
 #include <string>
 
 #include "src/common/base/base.h"
@@ -31,7 +32,7 @@ namespace protocols {
 namespace mongodb {
 
 ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
-  PX_ASSIGN_OR(uint32_t flag_bits, decoder->ExtractIntFromLEndianBytes<uint32_t>(),
+  PX_ASSIGN_OR(uint32_t flag_bits, decoder->ExtractLEInt<uint32_t>(),
                return ParseState::kInvalid);
 
   // Find relavent flag bit information and ensure remaining bits are not set.
@@ -54,7 +55,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
   // Get the section(s) data from the buffer.
   while (decoder->BufSize() > checksum_bytes) {
     mongodb::Section section;
-    PX_ASSIGN_OR(section.kind, decoder->ExtractIntFromLEndianBytes<uint8_t>(),
+    PX_ASSIGN_OR(section.kind, decoder->ExtractLEInt<uint8_t>(),
                  return ParseState::kInvalid);
     // Length of the section still remaining in the buffer.
     int32_t remaining_section_length = 0;
@@ -65,9 +66,9 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
         return ParseState::kInvalid;
       }
       remaining_section_length = section.length;
-
+      
     } else if (section.kind == 1) {
-      PX_ASSIGN_OR(section.length, decoder->ExtractIntFromLEndianBytes<uint32_t>(),
+      PX_ASSIGN_OR(section.length, decoder->ExtractLEInt<uint32_t>(),
                    return ParseState::kInvalid);
       if (section.length <= 0) {
         return ParseState::kInvalid;
@@ -76,13 +77,14 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       // Get the sequence ID (command argument).
       PX_ASSIGN_OR(std::string_view seq_id, decoder->ExtractStringUntil('\0'),
                    return ParseState::kInvalid);
-
       // Make sure the sequence ID is a valid OP_MSG command argument.
       if (seq_id != "documents" && seq_id != "updates" && seq_id != "deletes") {
         return ParseState::kInvalid;
       }
-
       remaining_section_length = section.length - kSectionLengthSize - seq_id.length() - 1;
+
+    } else {
+      return ParseState::kInvalid;
     }
 
     // Extract the document(s) from the section and convert it from type BSON to JSON string.
@@ -90,14 +92,25 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
       PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(document_length),
                    return ParseState::kInvalid);
+
       bson_t* bson_doc = bson_new_from_data(section_body.data(), document_length);
       if (bson_doc == NULL) {
         return ParseState::kInvalid;
       }
+
       char* json = bson_as_canonical_extended_json(bson_doc, NULL);
       if (json == NULL) {
         return ParseState::kInvalid;
       }
+
+      // Find the type of command argument if it is a request. 
+      if (section.kind == 0) {
+        rapidjson::Document doc;
+        doc.Parse(json);
+        frame->command = doc.MemberBegin()->name.GetString();
+        LOG(INFO) << absl::Substitute("$0", doc.MemberBegin()->name.GetString());
+      }
+
       section.documents.push_back(json);
 
       bson_free(json);
@@ -110,33 +123,10 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
 
   // Get the checksum data, if necessary.
   if (frame->checksum_present) {
-    PX_ASSIGN_OR(frame->checksum, decoder->ExtractIntFromLEndianBytes<uint32_t>(),
+    PX_ASSIGN_OR(frame->checksum, decoder->ExtractLEInt<uint32_t>(),
                  return ParseState::kNeedsMoreData);
   }
   return ParseState::kSuccess;
-}
-
-ParseState ProcessOpCompressed(BinaryDecoder* decoder, Frame* frame) {
-  // Get the original op code.
-  PX_ASSIGN_OR(frame->original_opcode, decoder->ExtractIntFromLEndianBytes<int32_t>(),
-               return ParseState::kInvalid);
-
-  // Get the uncompressed size.
-  PX_ASSIGN_OR(frame->uncompressed_size, decoder->ExtractIntFromLEndianBytes<int32_t>(),
-               return ParseState::kInvalid);
-
-  // Get the compressor ID.
-  PX_ASSIGN_OR(frame->compressor_id, decoder->ExtractIntFromLEndianBytes<uint8_t>(),
-               return ParseState::kInvalid);
-
-  // Get the compressed message.
-  uint8_t pre_message_length = 9;
-  uint32_t message_length = frame->length - mongodb::kHeaderLength - pre_message_length;
-  PX_ASSIGN_OR(frame->compressed_message, decoder->ExtractString(message_length),
-               return ParseState::kInvalid);
-
-  // TODO(kpattaswamy): Add support to decompress the message.
-  return ParseState::kIgnored;
 }
 
 ParseState ProcessPayload(BinaryDecoder* decoder, Frame* frame) {
@@ -145,7 +135,7 @@ ParseState ProcessPayload(BinaryDecoder* decoder, Frame* frame) {
     case Type::kOPMsg:
       return ProcessOpMsg(decoder, frame);
     case Type::kOPCompressed:
-      return ProcessOpCompressed(decoder, frame);
+      return ParseState::kIgnored;
     case Type::kReserved:
       return ParseState::kIgnored;
     default:

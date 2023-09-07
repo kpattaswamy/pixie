@@ -100,11 +100,12 @@ struct Frame : public FrameBase {
   int32_t op_code = 0;
 
   // OP_MSG Fields
-  // Relavent flag bits
+  // Relevant flag bits
   bool checksum_present = false;
   bool more_to_come = false;
   bool exhaust_allowed = false;
   std::vector<Section> sections;
+  std::string command;
   uint32_t checksum = 0;
 
   // OP_COMPRESSED Fields
