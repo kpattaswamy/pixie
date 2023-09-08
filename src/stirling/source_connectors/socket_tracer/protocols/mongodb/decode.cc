@@ -38,7 +38,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
 
   // Find relavent flag bit information and ensure remaining bits are not set.
   // Bits 0-15 are required and bits 16-31 are optional.
-  for (int i = 0; i < 17; i++) {
+  for (int i = 0; i <= 16; i++) {
     if (i == 0 && (flag_bits >> i) & 1) {
       frame->checksum_present = true;
     } else if (i == 1 && (flag_bits >> i) & 1) {
@@ -63,7 +63,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
 
     if (section.kind == 0) {
       section.length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
-      if (section.length <= 0) { // check this again
+      if (section.length < kSectionLengthSize) {
         return ParseState::kInvalid;
       }
       remaining_section_length = section.length;
@@ -71,18 +71,19 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
     } else if (section.kind == 1) {
       PX_ASSIGN_OR(section.length, decoder->ExtractLEInt<uint32_t>(),
                    return ParseState::kInvalid);
-      if (section.length <= 0) {
+      if (section.length < kSectionLengthSize) {
         return ParseState::kInvalid;
       }
 
-      // Get the sequence ID (command argument).
-      PX_ASSIGN_OR(std::string_view seq_id, decoder->ExtractStringUntil('\0'),
+      // Get the sequence identifier (command argument).
+      PX_ASSIGN_OR(std::string_view seq_identifier, decoder->ExtractStringUntil('\0'),
                    return ParseState::kInvalid);
-      // Make sure the sequence ID is a valid OP_MSG command argument.
-      if (seq_id != "documents" && seq_id != "updates" && seq_id != "deletes") {
+      // Make sure the sequence ID is a valid OP_MSG kind 1 command argument.
+      if (seq_identifier != "documents" && seq_identifier != "updates" && seq_identifier != "deletes") {
         return ParseState::kInvalid;
       }
-      remaining_section_length = section.length - kSectionLengthSize - seq_id.length() - 1;
+
+      remaining_section_length = section.length - kSectionLengthSize - seq_identifier.length() - 1;
 
     } else {
       return ParseState::kInvalid;
@@ -91,15 +92,24 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
     // Extract the document(s) from the section and convert it from type BSON to JSON string.
     while (decoder->BufSize() > decoder->BufSize() - remaining_section_length) {
       auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
+      if (document_length > kMaxBSONOBjSize) {
+        return ParseState::kInvalid;
+      }
+
       PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(document_length),
                    return ParseState::kInvalid);
+
+      // Check if section_body contains an empty document. 
+      if (section_body.length() == kSectionLengthSize) {
+        section.documents.push_back("");
+        continue;
+      }
 
       bson_t* bson_doc = bson_new_from_data(section_body.data(), document_length);
       DEFER(bson_destroy(bson_doc));
       if (bson_doc == NULL) {
         return ParseState::kInvalid;
       }
-
       char* json = bson_as_canonical_extended_json(bson_doc, NULL);
       DEFER(bson_free(json));
       if (json == NULL) {

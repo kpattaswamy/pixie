@@ -61,6 +61,8 @@ constexpr std::string_view find = "find";
 constexpr std::string_view cursor = "cursor";
 constexpr std::string_view ok = "ok";
 
+constexpr int32_t kMaxBSONOBjSize = 16000000;
+
 /**
  * MongoDB's Wire Protocol documentation can be found here:
  * https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#std-label-wire-msg-sections

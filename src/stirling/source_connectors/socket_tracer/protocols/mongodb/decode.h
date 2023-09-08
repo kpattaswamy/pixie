@@ -26,7 +26,9 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
+ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame);
 ParseState ProcessPayload(BinaryDecoder* decoder, Frame* frame);
+
 }  // namespace mongodb
 }  // namespace protocols
 }  // namespace stirling

@@ -28,7 +28,7 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
-ParseState ParseFullFrame(BinaryDecoder* decoder, Frame* frame);
+ParseState ParseFrame(BinaryDecoder* decoder, Frame* frame);
 
 }  // namespace mongodb
 
