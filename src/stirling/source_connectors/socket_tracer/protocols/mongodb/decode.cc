@@ -24,6 +24,7 @@
 #include "src/common/base/base.h"
 #include "src/common/base/utils.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/decode.h"
+#include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/types.h"
 #include "src/stirling/utils/binary_decoder.h"
 
 namespace px {
@@ -107,8 +108,30 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       if (section.kind == 0) {
         rapidjson::Document doc;
         doc.Parse(json);
-        frame->command = doc.MemberBegin()->name.GetString();
-        LOG(INFO) << absl::Substitute("$0", doc.MemberBegin()->name.GetString());
+
+        // The type of all request commands and the response to a find requests 
+        // will always be the first key.
+        auto command = doc.MemberBegin()->name.GetString();
+        if ((command == insert || command == delete_ || command == update || 
+              command == find || command == cursor)) {
+          frame->command = command;
+        } else {
+          // Find the "ok" key and its value.
+          auto itr = doc.FindMember("ok");
+          if (itr == doc.MemberEnd()) {
+            return ParseState::kInvalid;
+          }
+          frame->command.append(itr->name.GetString()).append(": ");
+          if (itr->value.IsObject()){
+            auto key = itr->value.MemberBegin()->name.GetString();
+            auto value = itr->value.MemberBegin()->value.GetString();
+            frame->command.append("{").append(key).append(": ").append(value).append("}");
+          } else if (itr->value.IsNumber()) {
+            frame->command.append(std::to_string(itr->value.GetInt()));
+          }
+        }
+
+        LOG(INFO) << absl::Substitute("$0", frame->command);
       }
 
       section.documents.push_back(json);
@@ -117,7 +140,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       bson_destroy(bson_doc);
     }
 
-    LOG(INFO) << absl::Substitute("$0", section.documents[0]);
+    //cLOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 

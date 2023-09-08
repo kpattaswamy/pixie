@@ -43,6 +43,12 @@ enum class Type : int32_t {
   kOPCompressed = 2012,
 };
 
+constexpr std::string_view insert = "insert";
+constexpr std::string_view delete_ = "delete";
+constexpr std::string_view update = "update";
+constexpr std::string_view find = "find";
+constexpr std::string_view cursor = "cursor";
+
 const uint8_t kHeaderLength = 16;
 const uint8_t kMessageLengthSize = 4;
 const uint8_t kSectionLengthSize = 4;
