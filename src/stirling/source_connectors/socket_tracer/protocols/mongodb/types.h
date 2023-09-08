@@ -43,21 +43,23 @@ enum class Type : int32_t {
   kOPCompressed = 2012,
 };
 
-constexpr std::string_view insert = "insert";
-constexpr std::string_view delete_ = "delete";
-constexpr std::string_view update = "update";
-constexpr std::string_view find = "find";
-constexpr std::string_view cursor = "cursor";
-
-const uint8_t kHeaderLength = 16;
-const uint8_t kMessageLengthSize = 4;
-const uint8_t kSectionLengthSize = 4;
+constexpr uint8_t kHeaderLength = 16;
+constexpr uint8_t kMessageLengthSize = 4;
+constexpr uint8_t kSectionLengthSize = 4;
 
 struct Section {
   uint8_t kind = 0;
   int32_t length = 0;
   std::vector<std::string> documents;
 };
+
+// Types of OP_MSG requests/responses
+constexpr std::string_view insert = "insert";
+constexpr std::string_view delete_ = "delete";
+constexpr std::string_view update = "update";
+constexpr std::string_view find = "find";
+constexpr std::string_view cursor = "cursor";
+constexpr std::string_view ok = "ok";
 
 /**
  * MongoDB's Wire Protocol documentation can be found here:
@@ -111,15 +113,8 @@ struct Frame : public FrameBase {
   bool more_to_come = false;
   bool exhaust_allowed = false;
   std::vector<Section> sections;
-  std::string command;
+  std::string op_msg_type;
   uint32_t checksum = 0;
-
-  // OP_COMPRESSED Fields
-  int32_t original_opcode = 0;
-  // Length of the uncompressed message, excluding the message header.
-  int32_t uncompressed_size = 0;
-  uint8_t compressor_id = 0;
-  std::string_view compressed_message;
 
   bool consumed = false;
   size_t ByteSize() const override { return sizeof(Frame); }

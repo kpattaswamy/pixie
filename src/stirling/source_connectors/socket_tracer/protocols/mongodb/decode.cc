@@ -63,7 +63,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
 
     if (section.kind == 0) {
       section.length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
-      if (section.length <= 0) {
+      if (section.length <= 0) { // check this again
         return ParseState::kInvalid;
       }
       remaining_section_length = section.length;
@@ -95,11 +95,13 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
                    return ParseState::kInvalid);
 
       bson_t* bson_doc = bson_new_from_data(section_body.data(), document_length);
+      DEFER(bson_destroy(bson_doc));
       if (bson_doc == NULL) {
         return ParseState::kInvalid;
       }
 
       char* json = bson_as_canonical_extended_json(bson_doc, NULL);
+      DEFER(bson_free(json));
       if (json == NULL) {
         return ParseState::kInvalid;
       }
@@ -109,38 +111,33 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
         rapidjson::Document doc;
         doc.Parse(json);
 
-        // The type of all request commands and the response to a find requests 
+        // The type of all request commands and the response to all find command requests 
         // will always be the first key.
-        auto command = doc.MemberBegin()->name.GetString();
-        if ((command == insert || command == delete_ || command == update || 
-              command == find || command == cursor)) {
-          frame->command = command;
+        auto op_msg_type = doc.MemberBegin()->name.GetString();
+        if ((op_msg_type == insert || op_msg_type == delete_ || op_msg_type == update || 
+              op_msg_type == find || op_msg_type == cursor)) {
+          frame->op_msg_type = op_msg_type;
         } else {
-          // Find the "ok" key and its value.
+          // The frame is a response message, find the "ok" key and its value.
           auto itr = doc.FindMember("ok");
           if (itr == doc.MemberEnd()) {
             return ParseState::kInvalid;
           }
-          frame->command.append(itr->name.GetString()).append(": ");
+          frame->op_msg_type.append(itr->name.GetString()).append(": ");
           if (itr->value.IsObject()){
             auto key = itr->value.MemberBegin()->name.GetString();
             auto value = itr->value.MemberBegin()->value.GetString();
-            frame->command.append("{").append(key).append(": ").append(value).append("}");
+            frame->op_msg_type.append("{").append(key).append(": ").append(value).append("}");
           } else if (itr->value.IsNumber()) {
-            frame->command.append(std::to_string(itr->value.GetInt()));
+            frame->op_msg_type.append(std::to_string(itr->value.GetInt()));
           }
         }
-
-        LOG(INFO) << absl::Substitute("$0", frame->command);
+        LOG(INFO) << absl::Substitute("$0", frame->op_msg_type);
       }
-
       section.documents.push_back(json);
-
-      bson_free(json);
-      bson_destroy(bson_doc);
     }
 
-    //cLOG(INFO) << absl::Substitute("$0", section.documents[0]);
+    //LOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 
