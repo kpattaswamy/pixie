@@ -27,34 +27,7 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
-ParseState ParseFullFrame(BinaryDecoder* decoder, Frame* frame) {
-  // Get the message's op code (type).
-  PX_ASSIGN_OR(frame->op_code, decoder->ExtractLEInt<int32_t>(),
-               return ParseState::kInvalid);
-
-  // Make sure the op code is a valid type for MongoDB.
-  Type frame_type = static_cast<Type>(frame->op_code);
-  if (!(frame_type == Type::kOPMsg || frame_type == Type::kOPReply ||
-        frame_type == Type::kOPUpdate || frame_type == Type::kOPInsert ||
-        frame_type == Type::kReserved || frame_type == Type::kOPQuery ||
-        frame_type == Type::kOPGetMore || frame_type == Type::kOPDelete ||
-        frame_type == Type::kOPKillCursors || frame_type == Type::kOPCompressed)) {
-    return ParseState::kInvalid;
-  }
-
-  // Parser will ignore Op Codes that have been deprecated/removed from version 5.0 onwards.
-  if (!(frame_type == Type::kOPMsg || frame_type == Type::kOPCompressed ||
-        frame_type == Type::kReserved)) {
-    return ParseState::kIgnored;
-  }
-
-  return ProcessPayload(decoder, frame);
-}
-
-}  // namespace mongodb
-
-template <>
-ParseState ParseFrame(message_type_t type, std::string_view* buf, mongodb::Frame* frame, NoState*) {
+ParseState ParseFrame(message_type_t type, std::string_view* buf, Frame* frame) {
   if (type != message_type_t::kRequest && type != message_type_t::kResponse) {
     return ParseState::kInvalid;
   }
@@ -80,13 +53,39 @@ ParseState ParseFrame(message_type_t type, std::string_view* buf, mongodb::Frame
   PX_ASSIGN_OR(frame->response_to, decoder.ExtractLEInt<uint32_t>(),
                return ParseState::kInvalid);
 
-  // Parse the full frame, including Op Code.
-  ParseState parse_state = mongodb::ParseFullFrame(&decoder, frame);
+  // Get the message's op code (type).
+  PX_ASSIGN_OR(frame->op_code, decoder.ExtractLEInt<int32_t>(),
+               return ParseState::kInvalid);
+
+  // Make sure the op code is a valid type for MongoDB.
+  Type frame_type = static_cast<Type>(frame->op_code);
+  if (!(frame_type == Type::kOPMsg || frame_type == Type::kOPReply ||
+        frame_type == Type::kOPUpdate || frame_type == Type::kOPInsert ||
+        frame_type == Type::kReserved || frame_type == Type::kOPQuery ||
+        frame_type == Type::kOPGetMore || frame_type == Type::kOPDelete ||
+        frame_type == Type::kOPKillCursors || frame_type == Type::kOPCompressed)) {
+    return ParseState::kInvalid;
+  }
+
+  // Parser will ignore Op Codes that have been deprecated/removed from version 5.0 onwards.
+  if (!(frame_type == Type::kOPMsg || frame_type == Type::kOPCompressed ||
+        frame_type == Type::kReserved)) {
+    return ParseState::kIgnored;
+  }
+
+  ParseState parse_state = mongodb::ProcessPayload(&decoder, frame);
   if (parse_state == ParseState::kSuccess) {
     buf->remove_prefix(frame->length);
   }
 
   return parse_state;
+}
+
+}  // namespace mongodb
+
+template <>
+ParseState ParseFrame(message_type_t type, std::string_view* buf, mongodb::Frame* frame, NoState*) {
+  return mongodb::ParseFrame(type, buf, frame);
 }
 
 template <>
