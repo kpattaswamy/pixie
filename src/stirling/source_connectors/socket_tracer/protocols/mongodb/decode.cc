@@ -87,8 +87,8 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
     }
 
     // Extract the document(s) from the section and convert it from type BSON to JSON string.
-    auto len = decoder->BufSize() - remaining_section_length;
-    while (decoder->BufSize() > len) {
+    auto parse_until = decoder->BufSize() - remaining_section_length;
+    while (decoder->BufSize() > parse_until) {
       auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
       if (document_length > kMaxBSONOBjSize) {
         return ParseState::kInvalid;
@@ -131,16 +131,15 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
           if (itr == doc.MemberEnd()) {
             return ParseState::kInvalid;
           }
-          frame->op_msg_type.append(itr->name.GetString()).append(": ");
+
           if (itr->value.IsObject()) {
-            auto key = itr->value.MemberBegin()->name.GetString();
-            auto value = itr->value.MemberBegin()->value.GetString();
-            frame->op_msg_type.append("{").append(key).append(": ").append(value).append("}");
+            frame->op_msg_type =
+                absl::Substitute("ok: {$0: $1}", itr->value.MemberBegin()->name.GetString(),
+                                 itr->value.MemberBegin()->value.GetString());
           } else if (itr->value.IsNumber()) {
-            frame->op_msg_type.append(std::to_string(itr->value.GetInt()));
+            frame->op_msg_type = absl::Substitute("ok: $0", std::to_string(itr->value.GetInt()));
           }
         }
-        LOG(INFO) << absl::Substitute("$0", frame->op_msg_type);
       }
       section.documents.push_back(json);
     }
