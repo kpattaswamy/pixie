@@ -144,14 +144,12 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
 
       section.documents.push_back(json);
     }
-    //LOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 
   // Get the checksum data, if necessary.
   if (frame->checksum_present) {
-    PX_ASSIGN_OR(frame->checksum, decoder->ExtractLEInt<uint32_t>(),
-                 return ParseState::kInvalid);
+    PX_ASSIGN_OR(frame->checksum, decoder->ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
   }
   return ParseState::kSuccess;
 }

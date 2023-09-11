@@ -103,8 +103,8 @@ constexpr int32_t kMaxBSONOBjSize = 16000000;
 
 struct Frame : public FrameBase {
   // Message Header Fields
-  // Length of the mongodb header and the application protocol data.
-  uint32_t length = 0;
+  // Length of the mongodb header and the wire protocol data.
+  int32_t length = 0;
   int32_t request_id = 0;
   int32_t response_to = 0;
   int32_t op_code = 0;
