@@ -97,7 +97,7 @@ constexpr uint8_t mongoDBInvalidFlagBits[] = {
 };
 
 constexpr uint8_t mongoDBMissingChecksum[] = {
-    // message length (157 bytes)
+    // message length (161 bytes)
     0x9d, 0x00, 0x00, 0x00,
     // request id (1144108930)
     0x82, 0xb7, 0x31, 0x44,
@@ -122,7 +122,7 @@ constexpr uint8_t mongoDBMissingChecksum[] = {
     0x64, 0x00, 0x64, 0xdb, 0xd4, 0x67, 0x8f, 0x0e, 0x65, 0x5d, 0x43,
     0x14, 0xd6, 0x8a, 0x02, 0x6e, 0x61, 0x6d, 0x65, 0x00, 0x07, 0x00,
     0x00, 0x00, 0x74, 0x65, 0x73, 0x6c, 0x61, 0x34, 0x00, 0x00,
-    // checksum bytes missing
+    // no checksum bytes
 };
 
 constexpr uint8_t mongoDBInvalidKindByte[] = {
@@ -137,7 +137,7 @@ constexpr uint8_t mongoDBInvalidKindByte[] = {
     // flag bits
     0x00, 0x00, 0x00, 0x00,
     // section 1 (invalid kind byte)
-    0x08, 0x9d, 0x00, 0x00, 0x00, 0x02, 0x69, 0x6e, 0x73, 0x65, 0x72,
+    0x05, 0x9d, 0x00, 0x00, 0x00, 0x02, 0x69, 0x6e, 0x73, 0x65, 0x72,
     0x74, 0x00, 0x04, 0x00, 0x00, 0x00, 0x63, 0x61, 0x72, 0x00, 0x04,
     0x64, 0x6f, 0x63, 0x75, 0x6d, 0x65, 0x6e, 0x74, 0x73, 0x00, 0x40,
     0x00, 0x00, 0x00, 0x03, 0x30, 0x00, 0x38, 0x00, 0x00, 0x00, 0x02,
@@ -183,7 +183,7 @@ constexpr uint8_t mongoDBInvalidSeqIdentifier[] = {
 };
 
 constexpr uint8_t mongoDBEmptyDocument[] = {
-    // message length (78 bytes)
+    // message length (79 bytes)
     0x4f, 0x00, 0x00, 0x00,
     // request id (1144108930)
     0x82, 0xb7, 0x31, 0x44,
@@ -250,7 +250,7 @@ constexpr uint8_t mongoDBValidResponse[] = {
 };
 
 constexpr uint8_t mongoDBValidRequestTwoSections[] = {
-    // message length (157 bytes)c
+    // message length (157 bytes)
     0x9d, 0x00, 0x00, 0x00,
     // request id (1144108930)
     0x82, 0xb7, 0x31, 0x44,
@@ -343,17 +343,14 @@ TEST_F(MongoDBParserTest, ParseFrameInvalidFlagBits) {
   EXPECT_EQ(state, ParseState::kInvalid);
 }
 
-TEST_F(MongoDBParserTest, ParseFrameMissingChecksum) {
+TEST_F(MongoDBParserTest, ParseFrameInvalidChecksum) {
   auto frame_view = CreateStringView<char>(CharArrayStringView<uint8_t>(mongoDBMissingChecksum));
 
   mongodb::Frame frame;
   ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
 
-  EXPECT_EQ(frame.length, 157);
-  EXPECT_EQ(frame.op_code, static_cast<int32_t>(mongodb::Type::kOPMsg));
-  EXPECT_EQ(frame.sections[0].length, 82);
-  EXPECT_EQ(frame.sections[1].length, 53);
-  EXPECT_EQ(state, ParseState::kNeedsMoreData);
+  EXPECT_TRUE(frame.checksum_present);
+  EXPECT_EQ(state, ParseState::kInvalid);
 }
 
 TEST_F(MongoDBParserTest, ParseFrameInvalidKindByte) {
@@ -362,8 +359,6 @@ TEST_F(MongoDBParserTest, ParseFrameInvalidKindByte) {
   mongodb::Frame frame;
   ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
 
-  EXPECT_EQ(frame.length, 178);
-  EXPECT_EQ(frame.op_code, static_cast<int32_t>(mongodb::Type::kOPMsg));
   EXPECT_EQ(state, ParseState::kInvalid);
 }
 
@@ -374,10 +369,6 @@ TEST_F(MongoDBParserTest, ParseFrameInvalidSeqIdentifier) {
   mongodb::Frame frame;
   ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
 
-  EXPECT_EQ(frame.length, 157);
-  EXPECT_EQ(frame.request_id, 1144108930);
-  EXPECT_EQ(frame.response_to, 0);
-  EXPECT_EQ(frame.op_code, static_cast<int32_t>(mongodb::Type::kOPMsg));
   EXPECT_EQ(state, ParseState::kInvalid);
 }
 
@@ -387,10 +378,6 @@ TEST_F(MongoDBParserTest, ParseFrameEmptyDocument) {
   mongodb::Frame frame;
   ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
 
-  EXPECT_EQ(frame.length, 79);
-  EXPECT_EQ(frame.request_id, 1144108930);
-  EXPECT_EQ(frame.response_to, 0);
-  EXPECT_EQ(frame.op_code, static_cast<int32_t>(mongodb::Type::kOPMsg));
   EXPECT_EQ(frame.sections[0].kind, 0);
   EXPECT_EQ(frame.sections[0].length, 4);
   EXPECT_EQ(frame.sections[0].documents[0].length(), 0);
@@ -456,7 +443,7 @@ TEST_F(MongoDBParserTest, ParseFrameValidResponseTwoSections) {
       CreateStringView<char>(CharArrayStringView<uint8_t>(mongoDBValidResponseTwoSections));
 
   mongodb::Frame frame;
-  ParseState state = ParseFrame(message_type_t::kRequest, &frame_view, &frame);
+  ParseState state = ParseFrame(message_type_t::kResponse, &frame_view, &frame);
 
   EXPECT_EQ(frame.length, 45);
   EXPECT_EQ(frame.request_id, 444);

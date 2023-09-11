@@ -86,7 +86,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       return ParseState::kInvalid;
     }
 
-    // Extract the document(s) from the section and convert it from type BSON to JSON string.
+    // Extract the document(s) from the section and convert it from type BSON to a JSON string.
     auto parse_until = decoder->BufSize() - remaining_section_length;
     while (decoder->BufSize() > parse_until) {
       auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
@@ -141,17 +141,17 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
           }
         }
       }
+
       section.documents.push_back(json);
     }
-
-    LOG(INFO) << absl::Substitute("$0", section.documents[0]);
+    //LOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 
   // Get the checksum data, if necessary.
   if (frame->checksum_present) {
     PX_ASSIGN_OR(frame->checksum, decoder->ExtractLEInt<uint32_t>(),
-                 return ParseState::kNeedsMoreData);
+                 return ParseState::kInvalid);
   }
   return ParseState::kSuccess;
 }
