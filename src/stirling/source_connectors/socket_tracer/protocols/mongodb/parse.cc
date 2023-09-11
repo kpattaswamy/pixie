@@ -39,23 +39,19 @@ ParseState ParseFrame(message_type_t type, std::string_view* buf, Frame* frame) 
 
   // Get the length of the packet. This length contains the size of the field containing the
   // message's length itself.
-  PX_ASSIGN_OR(frame->length, decoder.ExtractLEInt<uint32_t>(),
-               return ParseState::kInvalid);
+  PX_ASSIGN_OR(frame->length, decoder.ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
   if (decoder.BufSize() < (frame->length - mongodb::kMessageLengthSize)) {
     return ParseState::kNeedsMoreData;
   }
 
   // Get the Request ID.
-  PX_ASSIGN_OR(frame->request_id, decoder.ExtractLEInt<uint32_t>(),
-               return ParseState::kInvalid);
+  PX_ASSIGN_OR(frame->request_id, decoder.ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
 
   // Get the Response To.
-  PX_ASSIGN_OR(frame->response_to, decoder.ExtractLEInt<uint32_t>(),
-               return ParseState::kInvalid);
+  PX_ASSIGN_OR(frame->response_to, decoder.ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
 
   // Get the message's op code (type).
-  PX_ASSIGN_OR(frame->op_code, decoder.ExtractLEInt<int32_t>(),
-               return ParseState::kInvalid);
+  PX_ASSIGN_OR(frame->op_code, decoder.ExtractLEInt<int32_t>(), return ParseState::kInvalid);
 
   // Make sure the op code is a valid type for MongoDB.
   Type frame_type = static_cast<Type>(frame->op_code);

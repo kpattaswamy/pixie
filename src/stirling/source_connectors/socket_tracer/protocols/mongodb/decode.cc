@@ -33,8 +33,7 @@ namespace protocols {
 namespace mongodb {
 
 ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
-  PX_ASSIGN_OR(uint32_t flag_bits, decoder->ExtractLEInt<uint32_t>(),
-               return ParseState::kInvalid);
+  PX_ASSIGN_OR(uint32_t flag_bits, decoder->ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
 
   // Find relavent flag bit information and ensure remaining bits are not set.
   // Bits 0-15 are required and bits 16-31 are optional.
@@ -56,8 +55,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
   // Get the section(s) data from the buffer.
   while (decoder->BufSize() > checksum_bytes) {
     mongodb::Section section;
-    PX_ASSIGN_OR(section.kind, decoder->ExtractLEInt<uint8_t>(),
-                 return ParseState::kInvalid);
+    PX_ASSIGN_OR(section.kind, decoder->ExtractLEInt<uint8_t>(), return ParseState::kInvalid);
     // Length of the section still remaining in the buffer.
     int32_t remaining_section_length = 0;
 
@@ -67,10 +65,9 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
         return ParseState::kInvalid;
       }
       remaining_section_length = section.length;
-      
+
     } else if (section.kind == 1) {
-      PX_ASSIGN_OR(section.length, decoder->ExtractLEInt<uint32_t>(),
-                   return ParseState::kInvalid);
+      PX_ASSIGN_OR(section.length, decoder->ExtractLEInt<uint32_t>(), return ParseState::kInvalid);
       if (section.length < kSectionLengthSize) {
         return ParseState::kInvalid;
       }
@@ -78,11 +75,11 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       // Get the sequence identifier (command argument).
       PX_ASSIGN_OR(std::string_view seq_identifier, decoder->ExtractStringUntil('\0'),
                    return ParseState::kInvalid);
-      // Make sure the sequence ID is a valid OP_MSG kind 1 command argument.
-      if (seq_identifier != "documents" && seq_identifier != "updates" && seq_identifier != "deletes") {
+      // Make sure the sequence identifier is a valid OP_MSG kind 1 command argument.
+      if (seq_identifier != "documents" && seq_identifier != "updates" &&
+          seq_identifier != "deletes") {
         return ParseState::kInvalid;
       }
-
       remaining_section_length = section.length - kSectionLengthSize - seq_identifier.length() - 1;
 
     } else {
@@ -90,7 +87,8 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
     }
 
     // Extract the document(s) from the section and convert it from type BSON to JSON string.
-    while (decoder->BufSize() > decoder->BufSize() - remaining_section_length) {
+    auto len = decoder->BufSize() - remaining_section_length;
+    while (decoder->BufSize() > len) {
       auto document_length = utils::LEndianBytesToInt<int32_t, 4>(decoder->Buf());
       if (document_length > kMaxBSONOBjSize) {
         return ParseState::kInvalid;
@@ -99,7 +97,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       PX_ASSIGN_OR(auto section_body, decoder->ExtractString<uint8_t>(document_length),
                    return ParseState::kInvalid);
 
-      // Check if section_body contains an empty document. 
+      // Check if section_body contains an empty document.
       if (section_body.length() == kSectionLengthSize) {
         section.documents.push_back("");
         continue;
@@ -116,16 +114,16 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
         return ParseState::kInvalid;
       }
 
-      // Find the type of command argument if it is a request. 
+      // Find the type of command argument from the kind 0 section.
       if (section.kind == 0) {
         rapidjson::Document doc;
         doc.Parse(json);
 
-        // The type of all request commands and the response to all find command requests 
+        // The type of all request commands and the response to all find command requests
         // will always be the first key.
         auto op_msg_type = doc.MemberBegin()->name.GetString();
-        if ((op_msg_type == insert || op_msg_type == delete_ || op_msg_type == update || 
-              op_msg_type == find || op_msg_type == cursor)) {
+        if ((op_msg_type == insert || op_msg_type == delete_ || op_msg_type == update ||
+             op_msg_type == find || op_msg_type == cursor)) {
           frame->op_msg_type = op_msg_type;
         } else {
           // The frame is a response message, find the "ok" key and its value.
@@ -134,7 +132,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
             return ParseState::kInvalid;
           }
           frame->op_msg_type.append(itr->name.GetString()).append(": ");
-          if (itr->value.IsObject()){
+          if (itr->value.IsObject()) {
             auto key = itr->value.MemberBegin()->name.GetString();
             auto value = itr->value.MemberBegin()->value.GetString();
             frame->op_msg_type.append("{").append(key).append(": ").append(value).append("}");
@@ -147,7 +145,7 @@ ParseState ProcessOpMsg(BinaryDecoder* decoder, Frame* frame) {
       section.documents.push_back(json);
     }
 
-    //LOG(INFO) << absl::Substitute("$0", section.documents[0]);
+    LOG(INFO) << absl::Substitute("$0", section.documents[0]);
     frame->sections.push_back(section);
   }
 
