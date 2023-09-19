@@ -38,34 +38,58 @@ RecordsWithErrorCount<mongodb::Record> StitchFrames(std::deque<mongodb::Frame>* 
   std::vector<mongodb::Record> records;
   int error_count = 0;
 
-  // Previous request frame's requestID.
-  int32_t prev_req_req_id = 1;
   // Previous response frame's requestID.
-  int32_t prev_resp_req_id = 0;
+  //int32_t prev_req_req_id = -1;
+
+  // Previous response frame's requestID.
+  //int32_t prev_resp_req_id = 0;
+
+  // Indicates whether when to skip the last request frame in a 1:N and N:M req/resp matching. The last request
+  // frame will not have the more_to_come bit set so it is necessary to keep track of when to consume it after 
+  // clearing its associated response frames.
+  //bool skip_req_frame = false;
 
   for (auto& req : *reqs) {
     for (auto resp_it = resps->begin(); resp_it != resps->end(); resp_it++) {
-      // Skip the current request frame if it is an extension of the previous request 
-      // frame. This is symbolized by the more_to_come flag bit in the previous frame.
-      if (req.response_to == prev_req_req_id) {
+      /* Logic to ignore multi frame messages in stitching
+      if (skip_req_frame) {
+        skip_req_frame = false;
         req.consumed = true;
         break;
       }
+      if (req.more_to_come || req.response_to == prev_req_req_id) {
+        prev_req_req_id = req.request_id;
+        req.consumed = true;
+        //break;
+
+        if (!req.more_to_come){
+          skip_req_frame = true;
+          continue;
+        } 
+        //break;
+      }
+      
       prev_req_req_id = req.request_id;
+      */
 
       auto& resp = *resp_it;
 
       if (resp.consumed) continue;
 
-      // Skip the current response frame if it is an extension of the previous response
-      // frame. 
-      if (resp.response_to == prev_resp_req_id) {
-        LOG(INFO) << absl::Substitute("resp ext $0 $1", resp.response_to, prev_resp_req_id);
+      /* Logic to ignore multi frame messages in stitching
+
+      // Skip the current response frame if it is an extension of the previous response frame. 
+      if (resp.response_to == prev_resp_req_id || resp.more_to_come) {
         prev_resp_req_id = resp.request_id;
         resp.consumed = true;
+        if (!resp.more_to_come) {
+          skip_req_frame = true;
+        }
         continue;
       }
       prev_resp_req_id = resp.request_id;
+      */
+
       Type req_type = static_cast<Type>(req.op_code);
 
       // kReserved messages do not have a response pair.
@@ -97,6 +121,7 @@ RecordsWithErrorCount<mongodb::Record> StitchFrames(std::deque<mongodb::Frame>* 
     }
   }
 
+  // TODO(kpattaswamy) Cleanup stale requests.
   auto it = reqs->begin();
   while (it != reqs->end()) {
     if (!(*it).consumed) {
