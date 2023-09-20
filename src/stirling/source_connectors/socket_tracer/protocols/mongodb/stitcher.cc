@@ -103,7 +103,7 @@ RecordsWithErrorCount<mongodb::Record> StitchFrames(std::deque<mongodb::Frame>* 
         resp.consumed = true;
         error_count++;
         VLOG(1) << absl::Substitute(
-            "Did not find a request matching the response. Response ID = $0 Type = $1", int32_t(resp.response_to),
+            "Did not find a request matching the response. RequestID = $0 ResponseTo = $1 Type = $2", resp.request_id, resp.response_to,
             resp.op_code);
         continue;
       }

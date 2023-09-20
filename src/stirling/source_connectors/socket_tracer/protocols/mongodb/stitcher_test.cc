@@ -42,7 +42,6 @@ Frame CreateMongoDBFrame(uint64_t ts_ns, mongodb::Type type, int32_t request_id,
   frame.response_to = response_to;
   frame.more_to_come = more_to_come;
   return frame;
-
 }
 
 TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneMatching) {
@@ -70,6 +69,92 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneMatching) {
   RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
   EXPECT_EQ(result.error_count, 0);
   EXPECT_THAT(result.records, SizeIs(8));
+  EXPECT_THAT(reqs, IsEmpty());
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+TEST_F(MongoDBStitchFramesTest, UnmatchedResponsesAreHandled) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 10, false),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+
+  EXPECT_EQ(result.error_count, 1);
+  EXPECT_EQ(result.records.size(), 1);
+
+  EXPECT_THAT(reqs, IsEmpty());
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+TEST_F(MongoDBStitchFramesTest, UnmatchedRequestsAreNotCleanedUp) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 0, false),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, false),
+      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 4, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+
+  EXPECT_EQ(result.error_count, 0);
+  EXPECT_THAT(result.records, SizeIs(2));
+  EXPECT_EQ(result.records[0].req.request_id, 2);
+  EXPECT_EQ(result.records[1].req.request_id, 4);
+  
+  // Stale requests are not yet cleaned up.
+  EXPECT_THAT(reqs, SizeIs(3));
+  EXPECT_THAT(reqs[0].consumed, false);
+  EXPECT_THAT(reqs[1].consumed, true);
+  EXPECT_THAT(reqs[2].consumed, true);
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+
+// Test case assusmes the protocol inference rejects all frames with moreToCome set to true.
+// However req/resp frames that are at the tail end of a moreToCome message will have not have
+// moreToCome set so we will need to avoid stitching them.
+TEST_F(MongoDBStitchFramesTest, HandleMisinferredReqAndLastMoreToComeResp) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
+      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 0, false),
+
+      // Dropped request with moreToCome set to true (requestID: 9, responseTo: 0)
+      // Dropped request with moreToCome set to true (requestID: 10, responseTo: 9)
+      // Dropped request with moreToCome set to true (requestID: 11, responseTo: 10)
+      
+      CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 0, false),
+      CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, false),
+      CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, false),
+
+      // Misinferred request as a response, moreToCome set to false
+      CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 11, false),
+      // Dropped response with moreToCome set to true (requestID: 13, responseTo: 9)
+      // Dropped response with moreToCome set to true (requestID: 14, responseTo: 13)
+      // Last response frame in a moreToCome series of frames
+      CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 14, false),
+
+      CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 16, false),
+      CreateMongoDBFrame(18, mongodb::Type::kOPMsg, 19, 18, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+  EXPECT_EQ(result.error_count, 2);
+  EXPECT_THAT(result.records, SizeIs(6));
   EXPECT_THAT(reqs, IsEmpty());
   EXPECT_THAT(resps, IsEmpty());
 }
@@ -184,50 +269,6 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneMatching) {
 //   EXPECT_THAT(reqs, IsEmpty());
 //   EXPECT_THAT(resps, IsEmpty());
 // }
-
-TEST_F(MongoDBStitchFramesTest, UnmatchedResponsesAreHandled) {
-  std::deque<mongodb::Frame> reqs = {
-      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 0, false),
-  };
-  std::deque<mongodb::Frame> resps = {
-      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 10, false),
-      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, false),
-  };
-
-  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-
-  EXPECT_EQ(result.error_count, 1);
-  EXPECT_EQ(result.records.size(), 1);
-
-  EXPECT_THAT(reqs, IsEmpty());
-  EXPECT_THAT(resps, IsEmpty());
-}
-
-TEST_F(MongoDBStitchFramesTest, UnmatchedRequestsAreNotCleanedUp) {
-  std::deque<mongodb::Frame> reqs = {
-      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
-      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 0, false),
-      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 0, false),
-  };
-  std::deque<mongodb::Frame> resps = {
-      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, false),
-      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 4, false),
-  };
-
-  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-
-  EXPECT_EQ(result.error_count, 0);
-  EXPECT_THAT(result.records, SizeIs(2));
-  EXPECT_EQ(result.records[0].req.request_id, 2);
-  EXPECT_EQ(result.records[1].req.request_id, 4);
-  
-  // Stale requests are not yet cleaned up.
-  EXPECT_THAT(reqs, SizeIs(3));
-  EXPECT_THAT(reqs[0].consumed, false);
-  EXPECT_THAT(reqs[1].consumed, true);
-  EXPECT_THAT(reqs[2].consumed, true);
-  EXPECT_THAT(resps, IsEmpty());
-}
 
 }  // namespace mongodb
 }  // namespace protocols
