@@ -163,7 +163,7 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneStitching) {
 TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
   absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>> reqs;
   absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>> resps;
-
+  
   // Add requests to map.
   reqs[1].push_back(CreateMongoDBFrame(0, 1, 0, false));
   reqs[3].push_back(CreateMongoDBFrame(2, 3, 0, false));
