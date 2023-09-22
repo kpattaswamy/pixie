@@ -33,7 +33,7 @@ using ::testing::SizeIs;
 class MongoDBStitchFramesTest : public ::testing::Test {};
 
 Frame CreateMongoDBFrame(uint64_t ts_ns, mongodb::Type type, int32_t request_id,
-                         int32_t response_to, bool more_to_come) {
+                         int32_t response_to, bool more_to_come, std::string doc = "") {
   mongodb::Frame frame;
   frame.timestamp_ns = ts_ns;
 
@@ -41,6 +41,11 @@ Frame CreateMongoDBFrame(uint64_t ts_ns, mongodb::Type type, int32_t request_id,
   frame.request_id = request_id;
   frame.response_to = response_to;
   frame.more_to_come = more_to_come;
+
+  mongodb::Section section;
+  section.documents.push_back(doc);
+
+  frame.sections.push_back(section);
   return frame;
 }
 
@@ -72,6 +77,49 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneMatching) {
   EXPECT_THAT(reqs, IsEmpty());
   EXPECT_THAT(resps, IsEmpty());
 }
+
+TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
+
+      // Request frame for multi frame response message
+      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
+
+      CreateMongoDBFrame(8, mongodb::Type::kOPMsg, 9, 0, false),
+      CreateMongoDBFrame(10, mongodb::Type::kOPMsg, 11, 0, false),
+      CreateMongoDBFrame(12, mongodb::Type::kOPMsg, 13, 0, false),
+      CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 0, false),
+      CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
+
+      // Multi frame response message
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, true, "1"),
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, true, "2"),
+      CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, false, "3"),
+
+      CreateMongoDBFrame(9, mongodb::Type::kOPMsg, 10, 9, false),
+      CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 11, false),
+      CreateMongoDBFrame(13, mongodb::Type::kOPMsg, 14, 13, false),
+      CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 15, false),
+      CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 17, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+  EXPECT_EQ(result.error_count, 0);
+  EXPECT_EQ(result.records[2].resp.sections[0].documents[0], "1");
+  EXPECT_EQ(result.records[2].resp.sections[1].documents[0], "2");
+  EXPECT_EQ(result.records[2].resp.sections[2].documents[0], "3");
+  EXPECT_THAT(result.records, SizeIs(8));
+
+  EXPECT_THAT(reqs, IsEmpty());
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+// Add test case for handling kReserved
 
 TEST_F(MongoDBStitchFramesTest, UnmatchedResponsesAreHandled) {
   std::deque<mongodb::Frame> reqs = {
@@ -116,159 +164,6 @@ TEST_F(MongoDBStitchFramesTest, UnmatchedRequestsAreNotCleanedUp) {
   EXPECT_THAT(reqs[2].consumed, true);
   EXPECT_THAT(resps, IsEmpty());
 }
-
-
-// Test case assusmes the protocol inference rejects all frames with moreToCome set to true.
-// However req/resp frames that are at the tail end of a moreToCome message will have not have
-// moreToCome set so we will need to avoid stitching them.
-TEST_F(MongoDBStitchFramesTest, HandleMisinferredReqAndLastMoreToComeResp) {
-  std::deque<mongodb::Frame> reqs = {
-      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
-      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
-      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
-      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 0, false),
-
-      // Dropped request with moreToCome set to true (requestID: 9, responseTo: 0)
-      // Dropped request with moreToCome set to true (requestID: 10, responseTo: 9)
-      // Dropped request with moreToCome set to true (requestID: 11, responseTo: 10)
-      
-      CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 0, false),
-      CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 0, false),
-  };
-  std::deque<mongodb::Frame> resps = {
-      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
-      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
-      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, false),
-      CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, false),
-
-      // Misinferred request as a response, moreToCome set to false
-      CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 11, false),
-      // Dropped response with moreToCome set to true (requestID: 13, responseTo: 9)
-      // Dropped response with moreToCome set to true (requestID: 14, responseTo: 13)
-      // Last response frame in a moreToCome series of frames
-      CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 14, false),
-
-      CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 16, false),
-      CreateMongoDBFrame(18, mongodb::Type::kOPMsg, 19, 18, false),
-  };
-
-  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-  EXPECT_EQ(result.error_count, 2);
-  EXPECT_THAT(result.records, SizeIs(6));
-  EXPECT_THAT(reqs, IsEmpty());
-  EXPECT_THAT(resps, IsEmpty());
-}
-
-// TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
-//   std::deque<mongodb::Frame> reqs = {
-//       CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
-//       CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
-//       CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
-//       CreateMongoDBFrame(8, mongodb::Type::kOPMsg, 9, 0, false),
-//       CreateMongoDBFrame(10, mongodb::Type::kOPMsg, 11, 0, false),
-//       CreateMongoDBFrame(12, mongodb::Type::kOPMsg, 13, 0, false),
-//       CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 0, false),
-//       CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 0, false),
-//   };
-//   std::deque<mongodb::Frame> resps = {
-//       CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
-//       CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
-
-//       CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, true),
-//       CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, true),
-//       CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, false),
-
-//       CreateMongoDBFrame(9, mongodb::Type::kOPMsg, 10, 9, false),
-//       CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 11, false),
-//       CreateMongoDBFrame(13, mongodb::Type::kOPMsg, 14, 13, false),
-//       CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 15, false),
-//       CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 17, false),
-//   };
-
-//   RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-//   EXPECT_EQ(result.error_count, 0);
-//   EXPECT_THAT(result.records, SizeIs(7));
-//   EXPECT_THAT(reqs, IsEmpty());
-//   EXPECT_THAT(resps, IsEmpty());
-// }
-
-/////////////
-// TEST_F(MongoDBStitchFramesTest, VerifyNtoOneStitching) {
-//   std::deque<mongodb::Frame> reqs = {
-//       CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
-//       CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
-//       CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
-//       CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 0, false),
-            
-//       // Multi frame request message
-//       CreateMongoDBFrame(8, mongodb::Type::kOPMsg, 9, 0, true),
-//       CreateMongoDBFrame(9, mongodb::Type::kOPMsg, 10, 9, true),
-//       CreateMongoDBFrame(10, mongodb::Type::kOPMsg, 11, 10, false),
-
-//       CreateMongoDBFrame(12, mongodb::Type::kOPMsg, 13, 0, false),
-//       CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 0, false),
-//       CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 0, false),
-//       CreateMongoDBFrame(18, mongodb::Type::kOPMsg, 19, 0, false),
-//   };
-//   std::deque<mongodb::Frame> resps = {
-//       CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
-//       CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
-//       CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, true),
-//       CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, true),
-
-//       CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 9, false),
-
-//       CreateMongoDBFrame(13, mongodb::Type::kOPMsg, 14, 3, false),
-//       CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 15, false),
-//       CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 17, false),
-//       CreateMongoDBFrame(19, mongodb::Type::kOPMsg, 20, 19, false),
-//   };
-
-//   RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-//   EXPECT_EQ(result.error_count, 0);
-//   EXPECT_THAT(result.records, SizeIs(8));
-//   EXPECT_THAT(reqs, IsEmpty());
-//   EXPECT_THAT(resps, IsEmpty());
-// }
-//////////////
-
-// TEST_F(MongoDBStitchFramesTest, VerifyNtoMStitching) {
-//   std::deque<mongodb::Frame> reqs = {
-//       CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
-//       CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
-//       CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
-
-//       // Multi frame request message
-//       CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 0, true),
-//       CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, true),
-//       CreateMongoDBFrame(8, mongodb::Type::kOPMsg, 9, 8, false),
-
-//       CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 0, false),
-//       CreateMongoDBFrame(13, mongodb::Type::kOPMsg, 14, 0, false),
-//       CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 0, false),
-//       CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 0, false),
-//   };
-//   std::deque<mongodb::Frame> resps = {
-//       CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
-//       CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
-//       CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, false),
-
-//       // Multi frame response message
-//       CreateMongoDBFrame(9, mongodb::Type::kOPMsg, 10, 7, true),
-//       CreateMongoDBFrame(10, mongodb::Type::kOPMsg, 11, 10, false),
-
-//       CreateMongoDBFrame(12, mongodb::Type::kOPMsg, 13, 12, false),
-//       CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 14, false),
-//       CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 16, false),
-//       CreateMongoDBFrame(18, mongodb::Type::kOPMsg, 19, 18, false),
-//   };
-
-//   RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
-//   EXPECT_EQ(result.error_count, 0);
-//   EXPECT_THAT(result.records, SizeIs(7));
-//   EXPECT_THAT(reqs, IsEmpty());
-//   EXPECT_THAT(resps, IsEmpty());
-// }
 
 }  // namespace mongodb
 }  // namespace protocols
