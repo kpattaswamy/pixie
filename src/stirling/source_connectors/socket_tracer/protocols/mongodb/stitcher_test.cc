@@ -47,7 +47,6 @@ Frame CreateMongoDBFrame(uint64_t ts_ns, int32_t request_id, int32_t response_to
   section.documents.push_back(doc);
 
   frame.sections.push_back(section);
-
   return frame;
 }
 
@@ -214,6 +213,49 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
   EXPECT_TRUE(areAllDequesEmpty(resps));
   EXPECT_THAT(state.stream_order, SizeIs(0));
 }
+
+TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
+
+      // Request frame for multi frame response message
+      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 0, false),
+
+      CreateMongoDBFrame(8, mongodb::Type::kOPMsg, 9, 0, false),
+      CreateMongoDBFrame(10, mongodb::Type::kOPMsg, 11, 0, false),
+      CreateMongoDBFrame(12, mongodb::Type::kOPMsg, 13, 0, false),
+      CreateMongoDBFrame(14, mongodb::Type::kOPMsg, 15, 0, false),
+      CreateMongoDBFrame(16, mongodb::Type::kOPMsg, 17, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, false),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
+
+      // Multi frame response message
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 5, true, "1"),
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, true, "2"),
+      CreateMongoDBFrame(7, mongodb::Type::kOPMsg, 8, 7, false, "3"),
+
+      CreateMongoDBFrame(9, mongodb::Type::kOPMsg, 10, 9, false),
+      CreateMongoDBFrame(11, mongodb::Type::kOPMsg, 12, 11, false),
+      CreateMongoDBFrame(13, mongodb::Type::kOPMsg, 14, 13, false),
+      CreateMongoDBFrame(15, mongodb::Type::kOPMsg, 16, 15, false),
+      CreateMongoDBFrame(17, mongodb::Type::kOPMsg, 18, 17, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+  EXPECT_EQ(result.error_count, 0);
+  EXPECT_EQ(result.records[2].resp.sections[0].documents[0], "1");
+  EXPECT_EQ(result.records[2].resp.sections[1].documents[0], "2");
+  EXPECT_EQ(result.records[2].resp.sections[2].documents[0], "3");
+  EXPECT_THAT(result.records, SizeIs(8));
+
+  EXPECT_THAT(reqs, IsEmpty());
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+// Add test case for handling kReserved
 
 TEST_F(MongoDBStitchFramesTest, UnmatchedResponsesAreHandled) {
   absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>> reqs;
