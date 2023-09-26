@@ -49,7 +49,7 @@ Frame CreateMongoDBFrame(uint64_t ts_ns, mongodb::Type type, int32_t request_id,
   return frame;
 }
 
-TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneMatching) {
+TEST_F(MongoDBStitchFramesTest, VerifyOnetoOneStitching) {
   std::deque<mongodb::Frame> reqs = {
       CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
       CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 0, false),
@@ -119,8 +119,6 @@ TEST_F(MongoDBStitchFramesTest, VerifyOnetoNStitching) {
   EXPECT_THAT(resps, IsEmpty());
 }
 
-// Add test case for handling kReserved
-
 TEST_F(MongoDBStitchFramesTest, UnmatchedResponsesAreHandled) {
   std::deque<mongodb::Frame> reqs = {
       CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 0, false),
@@ -156,12 +154,77 @@ TEST_F(MongoDBStitchFramesTest, UnmatchedRequestsAreNotCleanedUp) {
   EXPECT_THAT(result.records, SizeIs(2));
   EXPECT_EQ(result.records[0].req.request_id, 2);
   EXPECT_EQ(result.records[1].req.request_id, 4);
-  
+
   // Stale requests are not yet cleaned up.
   EXPECT_THAT(reqs, SizeIs(3));
   EXPECT_THAT(reqs[0].consumed, false);
   EXPECT_THAT(reqs[1].consumed, true);
   EXPECT_THAT(reqs[2].consumed, true);
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+TEST_F(MongoDBStitchFramesTest, MissingHeadFrameInNResponses) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      // Missing head frame in the N responses
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, true),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, false),
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+
+  EXPECT_EQ(result.error_count, 3);
+  EXPECT_EQ(result.records.size(), 1);
+
+  EXPECT_THAT(reqs, SizeIs(2));
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+TEST_F(MongoDBStitchFramesTest, MissingFrameInNResponses) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, true),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, true),
+      // Missing middle frame in the N responses
+      CreateMongoDBFrame(4, mongodb::Type::kOPMsg, 5, 4, false),
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+
+  EXPECT_EQ(result.error_count, 2);
+  EXPECT_EQ(result.records.size(), 2);
+
+  EXPECT_THAT(reqs, IsEmpty());
+  EXPECT_THAT(resps, IsEmpty());
+}
+
+TEST_F(MongoDBStitchFramesTest, MissingTailFrameInNResponses) {
+  std::deque<mongodb::Frame> reqs = {
+      CreateMongoDBFrame(0, mongodb::Type::kOPMsg, 1, 0, false),
+      CreateMongoDBFrame(5, mongodb::Type::kOPMsg, 6, 0, false),
+  };
+  std::deque<mongodb::Frame> resps = {
+      CreateMongoDBFrame(1, mongodb::Type::kOPMsg, 2, 1, true),
+      CreateMongoDBFrame(2, mongodb::Type::kOPMsg, 3, 2, true),
+      CreateMongoDBFrame(3, mongodb::Type::kOPMsg, 4, 3, true),
+      // Missing tail frame in the N responses
+      CreateMongoDBFrame(6, mongodb::Type::kOPMsg, 7, 6, false),
+  };
+
+  RecordsWithErrorCount<mongodb::Record> result = mongodb::StitchFrames(&reqs, &resps);
+
+  EXPECT_EQ(result.error_count, 1);
+  EXPECT_EQ(result.records.size(), 2);
+
+  EXPECT_THAT(reqs, IsEmpty());
   EXPECT_THAT(resps, IsEmpty());
 }
 

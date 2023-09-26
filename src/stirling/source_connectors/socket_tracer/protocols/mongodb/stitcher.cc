@@ -34,82 +34,92 @@ namespace stirling {
 namespace protocols {
 namespace mongodb {
 
-RecordsWithErrorCount<mongodb::Record> StitchFrames(std::deque<mongodb::Frame>* reqs, std::deque<mongodb::Frame>* resps) {
+RecordsWithErrorCount<mongodb::Record> StitchFrames(std::deque<mongodb::Frame>* reqs,
+                                                    std::deque<mongodb::Frame>* resps) {
   std::vector<mongodb::Record> records;
   int error_count = 0;
 
   int32_t prev_resp_req_id = 0;
   bool more_to_come = false;
-  mongodb::Frame* head_resp_frame;
+  mongodb::Frame* head_resp_frame = nullptr;
 
   for (auto& req : *reqs) {
     for (auto resp_it = resps->begin(); resp_it != resps->end(); resp_it++) {
       auto& resp = *resp_it;
       if (resp.consumed) continue;
 
-      Type req_type = static_cast<Type>(req.op_code);
-
-      // kReserved messages do not have a response pair.
-      if (req_type == Type::kReserved) {
-        req.consumed = true;
-        records.push_back({std::move(req), {}});
-        break;
-      }
-
       if (req.timestamp_ns > resp.timestamp_ns) {
         resp.consumed = true;
         error_count++;
+        more_to_come = false;
+        head_resp_frame = nullptr;
         VLOG(1) << absl::Substitute(
-            "Did not find a request matching the response. RequestID = $0 ResponseTo = $1 Type = $2", resp.request_id, resp.response_to,
-            resp.op_code);
+            "Did not find a request matching the response. Request's RequestID = $0 Response's "
+            "ResponseTo = $1 Type = $2",
+            resp.request_id, resp.response_to, resp.op_code);
         continue;
       }
 
       if (resp.more_to_come) {
         more_to_come = true;
-      } 
+      }
 
       // Make sure the request's requestID matches with the response's responseTo for 1:1 stitching.
       if (req.request_id != resp.response_to && !more_to_come) {
         continue;
-      } 
+      }
 
       // Handle the case of 1:N request to response frame stitching.
       if (more_to_come) {
-        // Check if either the request pairs with the response or if the response extends prior response.
+        // Check if either the request pairs with the current response or if the response
+        // extends the prior response.
         if (req.request_id != resp.response_to && prev_resp_req_id != resp.response_to) {
-          resp.consumed = true;
           error_count++;
-          continue;
+          if (head_resp_frame != nullptr) {
+            // We encountered a response frame which may have extended a prior missing response.
+            // This logic will stitch the request with the partial responses we already found.
+            // The remaining frames comprising this response message will be dropped since we can't
+            // know for sure what request frame they pair with.
+            req.consumed = true;
+            head_resp_frame->consumed = true;
+            records.push_back({std::move(req), std::move(*head_resp_frame)});
+            more_to_come = false;
+            head_resp_frame = nullptr;
+          }
+          break;
         }
 
         prev_resp_req_id = resp.request_id;
 
-        // Find the head response frame in the series of more to come frames. 
+        // Find the head response frame in the series of more to come frames and skip to the next
+        // response frame.
         if (req.request_id == resp.response_to) {
           head_resp_frame = &resp;
           continue;
         }
 
         // Append the current response frame's sections to the head response frame.
-        head_resp_frame->sections.insert(std::end(head_resp_frame->sections), std::begin(resp.sections), std::end(resp.sections));
+        head_resp_frame->sections.insert(std::end(head_resp_frame->sections),
+                                         std::begin(resp.sections), std::end(resp.sections));
         resp.consumed = true;
 
-        // Continue to append the next response to the head frame if there's more to come.
+        // Continue to append the next response to the head frame if there's more to come. This will
+        // not execute on a tail response frame.
         if (resp.more_to_come) {
           continue;
         }
       }
 
-      // Add the request and response pair to records.
+      // Either stitch the request with the current response or the head response frame.
       req.consumed = true;
       if (more_to_come) {
         head_resp_frame->consumed = true;
         records.push_back({std::move(req), std::move(*head_resp_frame)});
         more_to_come = false;
+        head_resp_frame = nullptr;
         break;
       }
-      
+
       resp.consumed = true;
       records.push_back({std::move(req), std::move(resp)});
       break;
