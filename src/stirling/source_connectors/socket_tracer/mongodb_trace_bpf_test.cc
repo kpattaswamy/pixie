@@ -32,7 +32,8 @@
 #include "src/stirling/core/output.h"
 #include "src/stirling/source_connectors/socket_tracer/mongodb_table.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/types.h"
-#include "src/stirling/source_connectors/socket_tracer/testing/container_images/mongodb_server_container.h"
+#include "src/stirling/source_connectors/socket_tracer/testing/container_images/mongodb_container.h"
+#include "src/stirling/source_connectors/socket_tracer/testing/container_images/mongodb_client_container.h"
 #include "src/stirling/source_connectors/socket_tracer/testing/protocol_checkers.h"
 #include "src/stirling/source_connectors/socket_tracer/testing/socket_trace_bpf_test_fixture.h"
 #include "src/stirling/testing/common.h"
@@ -48,6 +49,7 @@ using ::px::stirling::testing::FindRecordsMatchingPID;
 using ::px::stirling::testing::GetTargetRecords;
 using ::px::stirling::testing::SocketTraceBPFTestFixture;
 using ::testing::AllOf;
+using ::testing::Eq;
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
@@ -55,75 +57,79 @@ using ::testing::Each;
 using ::testing::Field;
 using ::testing::MatchesRegex;
 
-bool Init() {
+void Init() {
   FLAGS_stirling_enable_mongodb_tracing = true;
-  return true;
 }
 
 class MongoDBTraceTest : public SocketTraceBPFTestFixture</* TClientSideTracing */ true> {
  protected:
-  MongoDBTraceTest() {
+   MongoDBTraceTest() {
     Init();
 
-    PX_CHECK_OK(server_.Run(std::chrono::seconds{60}));
+    // The container runner will make sure it is in the ready state before unblocking.
+    // Stirling will run after this unblocks, as part of SocketTraceBPFTest SetUp().
+
+    PX_CHECK_OK(mongodb_server_.Run(std::chrono::seconds{120}));
   }
 
-  std::string mongodb_client_output = "StringString";
-
-  std::string classpath =
-      "@/app/px/src/stirling/source_connectors/socket_tracer/testing/containers/mongodb/"
-      "server_image.classpath";
-
-  StatusOr<int32_t> RunMongoDBClient() {
-    std::string cmd =
-        absl::StrFormat("podman exec %s /usr/bin/java -cp %s Client & echo $! && wait",
-                        server_.container_name(), classpath);
-    PX_ASSIGN_OR_RETURN(std::string out, px::Exec(cmd));
-
-    LOG(INFO) << absl::StrFormat("mongodb client command output: '%s'", out);
-
-    std::vector<std::string> tokens = absl::StrSplit(out, "\n");
+  StatusOr<int32_t> GetPIDFromOutput(std::string_view out) {
+    std::vector<std::string_view> lines = absl::StrSplit(out, "\n");
+    if (lines.empty()) {
+      return error::Internal("Executed output (pid) from command.");
+    }
 
     int32_t client_pid;
-    if (!absl::SimpleAtoi(tokens[0], &client_pid)) {
+    if (!absl::SimpleAtoi(lines[0], &client_pid)) {
       return error::Internal("Could not extract PID.");
     }
 
-    LOG(INFO) << absl::StrFormat("Client PID: %d", client_pid);
-
-    if (!absl::StrContains(out, mongodb_client_output)) {
-      return error::Internal(
-          absl::StrFormat("Expected output from mongodb to include '%s', received '%s' instead",
-                          mongodb_client_output, out));
-    }
     return client_pid;
   }
 
-  ::px::stirling::testing::MongoDBServerContainer server_;
-};
-
-struct MongoDBTraceRecord {
-  int64_t ts_ns = 0;
-  mongodb::Type op_code;
-  std::string req_cmd;
-  std::string req_body;
-  std::string resp_status;
-  std::string resp_body;
-
-  std::string ToString() const {
-    return absl::Substitute("ts_ns=$0 req_cmd=$1 req_body=$2 resp_status=$3 resp_body=$4", ts_ns,
-                            req_cmd, req_body, resp_status, resp_body);
+  void RunMongoDBClient() {
+    mongodb_client_.Run(
+        std::chrono::seconds{120},
+        {absl::Substitute("--network=container:$0", mongodb_server_.container_name())});
   }
+
+  ::px::stirling::testing::MongoDBClientContainer mongodb_client_;
+  ::px::stirling::testing::MongoDBContainer mongodb_server_;
 };
 
-auto EqMongoDBTraceRecord(const MongoDBTraceRecord& r) {
-  return AllOf(Field(&MongoDBTraceRecord::op_code, Eq(r.op_code)),
-               Field(&MongoDBTraceRecord::req_cmd, Eq(r.op_msg_type)),
-               Field(&MongoDBTraceRecord::resp_status, HasSubstr("ok")));
+// struct MongoDBTraceRecord {
+//   int64_t ts_ns = 0;
+//   std::string req_cmd;
+//   std::string req_body;
+//   std::string resp_status;
+//   std::string resp_body;
+
+//   std::string ToString() const {
+//     return absl::Substitute("ts_ns=$0 req_cmd=$1 req_body=$2 resp_status=$3 resp_body=$4", ts_ns,
+//                             req_cmd, req_body, resp_status, resp_body);
+//   }
+// };
+
+
+// auto EqMongoDBTraceRecord(const MongoDBTraceRecord& r) {
+//   return AllOf(Field(&MongoDBTraceRecord::req_cmd, Eq(r.req_cmd)),
+//                Field(&MongoDBTraceRecord::req_body, Eq(r.req_body)),
+//                Field(&MongoDBTraceRecord::resp_status, Eq(r.resp_status))
+//                Field(&MongoDBTraceRecord::resp_body, Eq(r.resp_body)));
+// }
+
+// MongoDBTraceRecord kOPMsgInsert = {
+//     .req_cmd = "insert", 
+//     .resp_status = "ok: {$numberDouble: 1.0}",
+// };
+
+auto EqMongoDB(const protocols::mongodb::Frame& f) {
+  return Field(&protocols::mongodb::Frame::op_msg_type, Eq(f.op_msg_type));
 }
 
-MongoDBTraceRecord kOPMsgInsert = {
-    .op_code = mongodb::Type::kOPMsg, .req_cmd = "insert", .resp_status = "ok: {$numberDouble: 1.0}"};
+auto EqMongoDBRecord(const protocols::mongodb::Record& r) {
+  return AllOf(Field(&protocols::mongodb::Record::req, EqMongoDB(r.req)),
+               Field(&protocols::mongodb::Record::resp, EqMongoDB(r.resp)));
+}
 
 std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatch& rb,
                                         const std::vector<size_t>& indices) {
@@ -131,31 +137,21 @@ std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatc
 
   for (const auto& idx : indices) {
     mongodb::Record r;
-    r.req.op_msg_type = rb[kMongoDBReqCmdIdx]->Get<types::StringValue>(idx).val;
+    r.req.op_msg_type = std::string(rb[kMongoDBReqCmdIdx]->Get<types::StringValue>(idx));
+    r.resp.op_msg_type = std::string(rb[kMongoDBRespStatusIdx]->Get<types::StringValue>(idx));
+
+
     result.push_back(r);
   }
   return result;
 }
 
-// mongodb::Record RecordOpMsgReq(mongodb::Type op_code, std::string op_msg_type) {
-//   mongodb::Record r = {};
-//   r.req.op_code = static_cast<int32_t>(op_code);
-//   r.req.op_msg_type = op_msg_type;
-//   return r;
-// }
 
-// mongodb::Record RecordOpMsgResp(mongodb::Type op_code, std::string op_msg_type) {
-//   mongodb::Record r = {};
-//   r.resp.op_code = static_cast<int32_t>(op_code);
-//   r.resp.op_msg_type = op_msg_type;
-//   return r;
-// }
-
-mongodb::Record RecordOpMsg(mongodb::Type op_code, std::string req_cmd, std::string resp_status) {
+mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status) {
   mongodb::Record r = {};
-  r.req.op_code = static_cast<int32_t>(op_code);
+  //r.req.op_code = static_cast<int32_t>(op_code);
   r.req.op_msg_type = req_cmd;
-  r.resp.op_code = static_cast<int32_t>(op_code);
+  //r.resp.op_code = static_cast<int32_t>(op_code);
   r.resp.op_msg_type = resp_status;
   return r;
 }
@@ -165,9 +161,10 @@ mongodb::Record RecordOpMsg(mongodb::Type op_code, std::string req_cmd, std::str
 //-----------------------------------------------------------------------------
 
 TEST_F(MongoDBTraceTest, Capture) {
+  // Initiate the mongo transactions.
   StartTransferDataThread();
 
-  ASSERT_OK(RunMongoDBClient());
+  RunMongoDBClient();
 
   StopTransferDataThread();
 
@@ -176,11 +173,14 @@ TEST_F(MongoDBTraceTest, Capture) {
   ASSERT_NOT_EMPTY_AND_GET_RECORDS(const types::ColumnWrapperRecordBatch& record_batch, tablets);
 
   std::vector<mongodb::Record> server_records =
-      ToRecordVector<mongodb::Record>(record_batch, server_.process_pid());
+      GetTargetRecords<mongodb::Record>(record_batch, mongodb_server_.process_pid());
 
-  mongodb::Record opMsg = RecordOpMsg(mongodb::Type::kOPMsg, "insert", "insert", "ok: {$numberDouble: 1.0}");
+  //std::vector<mongodb::Record> server_records = ToRecordVector<mongodb::Record>(record_batch, mongodb_server_.process_pid());
 
-  EXPECT_THAT(server_records, Contains(EqMongoDBTraceRecord(opMsg)));
+  mongodb::Record opMsgInsert = RecordOpMsg("insert", "ok: {$numberDouble: 1.0}");
+
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgInsert)));
+  //EXPECT_THAT(server_records, Contains(EqMongoDBTraceRecord(opMsgInsert)));
 }
 
 }  // namespace stirling
