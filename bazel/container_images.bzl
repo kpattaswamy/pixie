@@ -278,3 +278,18 @@ def stirling_test_images():
         repository = "google-samples/microservices-demo/emailservice",
         digest = "sha256:d42ee712cbb4806a8b922e303a5e6734f342dfb6c92c81284a289912165b7314",
     )
+
+    # Tag: mongo:7.0
+    # Arch: linux/amd64
+    container_pull(
+        name = "mongo_7_0",
+        digest = "sha256:05bb0d03427adc9f27eb93b02dd501e4f852f3ff46144bfd42a227721c496e1f",
+        registry = "docker.io",
+        repository = "mongo",
+    )
+
+    # _container_image(
+    #     name = "mongo_7_0",
+    #     repository = "mongo",
+    #     digest = "sha256:05bb0d03427adc9f27eb93b02dd501e4f852f3ff46144bfd42a227721c496e1f",
+    # )
