@@ -37,7 +37,7 @@ class MongoDBContainer : public ContainerRunner {
   static constexpr std::string_view kBazelImageTar =
       "src/stirling/source_connectors/socket_tracer/testing/containers/mongodb_image.tar";
   static constexpr std::string_view kContainerNamePrefix = "mongodb_server";
-  static constexpr std::string_view kReadyMessage = "MongoDB server startup complete";
+  static constexpr std::string_view kReadyMessage = "Waiting for connections";
 };
 
 }  // namespace testing

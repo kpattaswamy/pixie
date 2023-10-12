@@ -28,8 +28,10 @@
 #include "src/shared/types/column_wrapper.h"
 #include "src/stirling/source_connectors/socket_tracer/http_table.h"
 #include "src/stirling/source_connectors/socket_tracer/mux_table.h"
+#include "src/stirling/source_connectors/socket_tracer/mongodb_table.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/http/types.h"
 #include "src/stirling/source_connectors/socket_tracer/protocols/mux/types.h"
+#include "src/stirling/source_connectors/socket_tracer/protocols/mongodb/types.h"
 
 namespace px {
 namespace stirling {
