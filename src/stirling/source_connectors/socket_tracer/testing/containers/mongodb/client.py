@@ -2,10 +2,10 @@ import pymongo
 import os
 import time
 
-print("sleep done")
-
+#print("sleep done")
+#time.sleep(60)
 print("Starting MongoDB client")
-time.sleep(60)
+#time.sleep(60)
 
 client = pymongo.MongoClient("mongodb://localhost:27017/?timeoutMS=2000")
 
@@ -13,7 +13,6 @@ db = client["carDB"]
 collection = db["car"]
 
 # Insert document
-
 print("Inserting document")
 car = { "name": "Honda" }
 resp = collection.insert_one(car)

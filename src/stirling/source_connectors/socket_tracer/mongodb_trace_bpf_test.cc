@@ -65,32 +65,13 @@ class MongoDBTraceTest : public SocketTraceBPFTestFixture</* TClientSideTracing 
  protected:
    MongoDBTraceTest() {
     Init();
-
-    // The container runner will make sure it is in the ready state before unblocking.
-    // Stirling will run after this unblocks, as part of SocketTraceBPFTest SetUp().
-
     PX_CHECK_OK(mongodb_server_.Run(std::chrono::seconds{120}));
    }
-
-    // StatusOr<int32_t> GetPIDFromOutput(std::string_view out) {
-    //   std::vector<std::string_view> lines = absl::StrSplit(out, "\n");
-    //   if (lines.empty()) {
-    //     return error::Internal("Executed output (pid) from command.");
-    //   }
-
-    //   int32_t client_pid;
-    //   if (!absl::SimpleAtoi(lines[0], &client_pid)) {
-    //     return error::Internal("Could not extract PID.");
-    //   }
-
-    //   return client_pid;
-    // }
-  
 
   void RunMongoDBClient() {
     mongodb_client_.Run(
         std::chrono::seconds{120},
-        {absl::Substitute("--network=container:$0 -d", mongodb_server_.container_name())});
+        {absl::Substitute("--network=container:$0", mongodb_server_.container_name())});
   }
 
   ::px::stirling::testing::MongoDBClientContainer mongodb_client_;
@@ -109,17 +90,14 @@ auto EqMongoDBRecord(const protocols::mongodb::Record& r) {
 std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatch& rb,
                                         const std::vector<size_t>& indices) {
   std::vector<mongodb::Record> result;
-
   for (const auto& idx : indices) {
     mongodb::Record r;
     r.req.op_msg_type = std::string(rb[kMongoDBReqCmdIdx]->Get<types::StringValue>(idx));
     r.resp.op_msg_type = std::string(rb[kMongoDBRespStatusIdx]->Get<types::StringValue>(idx));
-
     result.push_back(r);
   }
   return result;
 }
-
 
 mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status) {
   mongodb::Record r = {};
@@ -135,9 +113,8 @@ mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status) {
 TEST_F(MongoDBTraceTest, Capture) {
   // Initiate the mongo transactions.
   StartTransferDataThread();
-
   RunMongoDBClient();
-
+  LOG(INFO) << "client finished running";
   StopTransferDataThread();
 
   // Grab the data from Stirling.
