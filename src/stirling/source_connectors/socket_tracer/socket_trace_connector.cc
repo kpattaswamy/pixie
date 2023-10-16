@@ -1589,9 +1589,9 @@ void SocketTraceConnector::AppendMessage(ConnectorContext* ctx, const ConnTracke
   r.Append<r.ColIndex("remote_port")>(conn_tracker.remote_endpoint().port());
   r.Append<r.ColIndex("trace_role")>(role);
   r.Append<r.ColIndex("req_cmd")>(std::string(record.req.op_msg_type));
-  r.Append<r.ColIndex("req_body")>(std::move(record.req.sections[0].documents[0]));
+  r.Append<r.ColIndex("req_body")>(std::move(record.req.frame_body));
   r.Append<r.ColIndex("resp_status")>(std::move(record.resp.op_msg_type));
-  r.Append<r.ColIndex("resp_body")>(std::move(record.resp.sections[0].documents[0]));
+  r.Append<r.ColIndex("resp_body")>(std::move(record.resp.frame_body));
   r.Append<r.ColIndex("latency")>(
       CalculateLatency(record.req.timestamp_ns, record.resp.timestamp_ns));
 #ifndef NDEBUG

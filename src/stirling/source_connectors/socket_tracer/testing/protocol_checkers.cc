@@ -73,7 +73,9 @@ std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatc
   for (const auto& idx : indices) {
     mongodb::Record r;
     r.req.op_msg_type = std::string(rb[kMongoDBReqCmdIdx]->Get<types::StringValue>(idx));
+    r.req.frame_body = std::string(rb[kMongoDBReqBodyIdx]->Get<types::StringValue>(idx));
     r.resp.op_msg_type = std::string(rb[kMongoDBRespStatusIdx]->Get<types::StringValue>(idx));
+    r.resp.frame_body = std::string(rb[kMongoDBRespBodyIdx]->Get<types::StringValue>(idx));
     result.push_back(r);
   }
   return result;

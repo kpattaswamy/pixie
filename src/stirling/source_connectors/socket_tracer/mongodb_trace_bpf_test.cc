@@ -50,6 +50,8 @@ using ::px::stirling::testing::GetTargetRecords;
 using ::px::stirling::testing::SocketTraceBPFTestFixture;
 using ::testing::AllOf;
 using ::testing::Eq;
+using ::testing::HasSubstr;
+
 using ::testing::UnorderedElementsAre;
 using ::testing::UnorderedElementsAreArray;
 
@@ -78,13 +80,19 @@ class MongoDBTraceTest : public SocketTraceBPFTestFixture</* TClientSideTracing 
   ::px::stirling::testing::MongoDBContainer mongodb_server_;
 };
 
-auto EqMongoDB(const protocols::mongodb::Frame& f) {
+auto EqMongoDBMsgType(const protocols::mongodb::Frame& f) {
   return Field(&protocols::mongodb::Frame::op_msg_type, Eq(f.op_msg_type));
 }
 
+auto ContainsMongoDBMsgBody(const protocols::mongodb::Frame& f) {
+  return Field(&protocols::mongodb::Frame::frame_body, HasSubstr(f.frame_body));
+}
+
 auto EqMongoDBRecord(const protocols::mongodb::Record& r) {
-  return AllOf(Field(&protocols::mongodb::Record::req, EqMongoDB(r.req)),
-               Field(&protocols::mongodb::Record::resp, EqMongoDB(r.resp)));
+  return AllOf(Field(&protocols::mongodb::Record::req, EqMongoDBMsgType(r.req)),
+               Field(&protocols::mongodb::Record::resp, EqMongoDBMsgType(r.resp)),
+               Field(&protocols::mongodb::Record::req, ContainsMongoDBMsgBody(r.req)),
+               Field(&protocols::mongodb::Record::resp, ContainsMongoDBMsgBody(r.resp)));
 }
 
 std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatch& rb,
@@ -93,16 +101,20 @@ std::vector<mongodb::Record> ToRecordVector(const types::ColumnWrapperRecordBatc
   for (const auto& idx : indices) {
     mongodb::Record r;
     r.req.op_msg_type = std::string(rb[kMongoDBReqCmdIdx]->Get<types::StringValue>(idx));
+    r.req.frame_body = std::string(rb[kMongoDBReqBodyIdx]->Get<types::StringValue>(idx));
     r.resp.op_msg_type = std::string(rb[kMongoDBRespStatusIdx]->Get<types::StringValue>(idx));
+    r.resp.frame_body = std::string(rb[kMongoDBRespBodyIdx]->Get<types::StringValue>(idx));
     result.push_back(r);
   }
   return result;
 }
 
-mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status) {
+mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status, std::string req_body, std::string resp_body ) {
   mongodb::Record r = {};
   r.req.op_msg_type = req_cmd;
+  r.req.frame_body = req_body;
   r.resp.op_msg_type = resp_status;
+  r.resp.frame_body = resp_body;
   return r;
 }
 
@@ -114,7 +126,6 @@ TEST_F(MongoDBTraceTest, Capture) {
   // Initiate the mongo transactions.
   StartTransferDataThread();
   RunMongoDBClient();
-  LOG(INFO) << "client finished running";
   StopTransferDataThread();
 
   // Grab the data from Stirling.
@@ -124,9 +135,23 @@ TEST_F(MongoDBTraceTest, Capture) {
   std::vector<mongodb::Record> server_records =
       GetTargetRecords<mongodb::Record>(record_batch, mongodb_server_.process_pid());
 
-  mongodb::Record opMsgInsert = RecordOpMsg("insert", "ok: {$numberDouble: 1.0}");
+  for (auto i : server_records) {
+    LOG(INFO) << "-----";
+    LOG(INFO) << "req type " << i.req.op_msg_type;
+    LOG(INFO) << "req body " << i.req.frame_body;
+    LOG(INFO) << "resp type " << i.resp.op_msg_type;
+    LOG(INFO) << "resp body " << i.resp.frame_body;
+  }
+
+  mongodb::Record opMsgInsert = RecordOpMsg("insert", "ok: {$numberDouble: 1.0}", "Honda", "ok");
+  mongodb::Record opMsgFind = RecordOpMsg("find", "cursor", "find", "Honda");
+  mongodb::Record opMsgUpdate = RecordOpMsg("update", "ok: {$numberDouble: 1.0}", "Toyota", "ok");
+  mongodb::Record opMsgDelete = RecordOpMsg("delete", "ok: {$numberDouble: 1.0}", "Toyota", "ok");
 
   EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgInsert)));
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgFind)));
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgUpdate)));
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgDelete)));
 }
 
 }  // namespace stirling

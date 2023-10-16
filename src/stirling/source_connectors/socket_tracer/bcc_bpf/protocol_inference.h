@@ -180,11 +180,14 @@ static __inline enum message_type_t infer_mongo_message(const char* buf, size_t 
   int32_t response_to = buf4[2];
   int32_t opcode = buf4[3];
 
-  if (opcode == kOPUpdate || opcode == kOPInsert || opcode == kReserved || opcode == kOPQuery ||
-      opcode == kOPGetMore || opcode == kOPDelete || opcode == kOPKillCursors ||
-      opcode == kOPCompressed || opcode == kOPMsg) {
+  // if (opcode == kOPUpdate || opcode == kOPInsert || opcode == kReserved || opcode == kOPQuery ||
+  //     opcode == kOPGetMore || opcode == kOPDelete || opcode == kOPKillCursors ||
+  //     opcode == kOPCompressed || opcode == kOPMsg) {
+  if (opcode == kOPMsg) {
     if (response_to == 0) {
       return kRequest;
+    } else {
+      return kResponse;
     }
   }
 
