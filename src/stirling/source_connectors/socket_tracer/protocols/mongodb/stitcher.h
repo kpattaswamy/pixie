@@ -40,13 +40,13 @@ RecordsWithErrorCount<mongodb::Record> StitchFrames(
 }  // namespace mongodb
 
 // Uncomment this when the upstream stitching interface is done
-// template <>
-// inline RecordsWithErrorCount<mongodb::Record> StitchFrames(
-//     absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>>* reqs,
-//     absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>>* resps,
-//     State* state) {
-//   return mongodb::StitchFrames(reqs, resps, state);
-// }
+template <>
+inline RecordsWithErrorCount<mongodb::Record> StitchFrames(
+    absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>>* reqs,
+    absl::flat_hash_map<mongodb::stream_id_t, std::deque<mongodb::Frame>>* resps,
+    mongodb::StateWrapper* state) {
+  return mongodb::StitchFrames(reqs, resps, &state->global);
+}
 
 }  // namespace protocols
 }  // namespace stirling

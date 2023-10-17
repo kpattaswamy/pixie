@@ -204,8 +204,8 @@ template void DataStream::ProcessBytesToFrames<protocols::nats::Message, protoco
     message_type_t type, protocols::NoState* state);
 template void DataStream::ProcessBytesToFrames<protocols::amqp::Frame, protocols::NoState>(
     message_type_t type, protocols::NoState* state);
-template void DataStream::ProcessBytesToFrames<protocols::mongodb::Frame, protocols::NoState>(
-    message_type_t type, protocols::NoState* state);
+template void DataStream::ProcessBytesToFrames<protocols::mongodb::Frame, protocols::mongodb::StateWrapper>(
+    message_type_t type, protocols::mongodb::StateWrapper* state);
 void DataStream::Reset() {
   data_buffer_.Reset();
   has_new_events_ = false;
