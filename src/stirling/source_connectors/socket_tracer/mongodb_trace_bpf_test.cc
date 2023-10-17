@@ -124,6 +124,7 @@ mongodb::Record RecordOpMsg(std::string req_cmd, std::string resp_status, std::s
 
 TEST_F(MongoDBTraceTest, Capture) {
   // Initiate the mongo transactions.
+  //FLAGS_stirling_conn_trace_pid = this->mongodb_server_.process_pid();
   StartTransferDataThread();
   RunMongoDBClient();
   StopTransferDataThread();
