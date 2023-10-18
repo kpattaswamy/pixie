@@ -171,6 +171,8 @@ struct ProtocolTraits : public BaseProtocolTraits<Record> {
   using record_type = Record;
   using state_type = StateWrapper;
   using key_type = stream_id_t;
+  static constexpr StreamSupport stream_support = BaseProtocolTraits<Record>::UseStream;
+
 };
 
 // struct ProtocolTraits : public BaseProtocolTraits<Record> {
