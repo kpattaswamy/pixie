@@ -145,13 +145,15 @@ TEST_F(MongoDBTraceTest, Capture) {
   }
 
   mongodb::Record opMsgInsert = RecordOpMsg("insert", "ok: {$numberDouble: 1.0}", "Honda", "ok");
-  mongodb::Record opMsgFind = RecordOpMsg("find", "cursor", "find", "Honda");
+  mongodb::Record opMsgFind1 = RecordOpMsg("find", "cursor", "find", "Honda");
   mongodb::Record opMsgUpdate = RecordOpMsg("update", "ok: {$numberDouble: 1.0}", "Toyota", "ok");
+  mongodb::Record opMsgFind2 = RecordOpMsg("find", "cursor", "find", "Toyota");
   mongodb::Record opMsgDelete = RecordOpMsg("delete", "ok: {$numberDouble: 1.0}", "Toyota", "ok");
 
   EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgInsert)));
-  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgFind)));
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgFind1)));
   EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgUpdate)));
+  EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgFind2)));
   EXPECT_THAT(server_records, Contains(EqMongoDBRecord(opMsgDelete)));
 }
 
